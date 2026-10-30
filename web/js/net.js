@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { createUnit, DEFS } from './vehicles.js';
-import { Projectiles } from './weapons.js';
-import { PER_TEAM } from './game.js';
+import { createUnit, DEFS } from './vehicles.js?v=9';
+import { Projectiles } from './weapons.js?v=9';
+import { PER_TEAM } from './game.js?v=9';
 
 // Mehrspieler über WebRTC (PeerJS). Der Host rechnet das Spiel, Clients senden Eingaben
 // und bekommen ~15-mal pro Sekunde den Spielstand.

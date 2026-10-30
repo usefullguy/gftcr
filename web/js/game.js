@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { createUnit, PLANES, SHIPS, DEFS } from './vehicles.js';
-import { PlaneAI, ShipAI } from './ai.js';
-import { Projectiles } from './weapons.js';
-import { rand, pick, clamp } from './util.js';
+import { createUnit, PLANES, SHIPS, DEFS } from './vehicles.js?v=9';
+import { PlaneAI, ShipAI } from './ai.js?v=9';
+import { Projectiles } from './weapons.js?v=9';
+import { rand, pick, clamp } from './util.js?v=9';
 
 const NAMES = ['Krause', 'Wagner', 'Becker', 'Schulz', 'Hoffmann', 'Koch', 'Richter', 'Wolf', 'Neumann', 'Schwarz',
   'Zimmermann', 'Braun', 'Hartmann', 'Lange', 'Werner', 'Lehmann', 'Köhler', 'Vogel', 'Frank', 'Berger',

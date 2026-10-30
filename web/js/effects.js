@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rand } from './util.js';
+import { rand } from './util.js?v=9';
 
 const ROTS = Array.from({ length: 32 }, () =>
   new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(0, 6.3), rand(0, 6.3), rand(0, 6.3))));

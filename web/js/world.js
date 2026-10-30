@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { fbm, mulberry32 } from './util.js';
+import { fbm, mulberry32 } from './util.js?v=9';
 
 export const MAP_HALF = 3800;
 export const SUN_DIR = new THREE.Vector3(-0.45, 0.6, -0.66).normalize();

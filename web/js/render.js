@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {
   EffectComposer, RenderPass, EffectPass, BloomEffect, SMAAEffect, SMAAPreset,
   VignetteEffect, ToneMappingEffect, ToneMappingMode, HueSaturationEffect, BrightnessContrastEffect,
-} from '../vendor/postprocessing.js';
+} from '../vendor/postprocessing.js?v=9';
 
 // Nachbearbeitung: Bloom für Feuer/Leuchtspur/Sonne, Kantenglättung, Vignette, Farbabstimmung.
 // Auf "niedrig" wird direkt gerendert.

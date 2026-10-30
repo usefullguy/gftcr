@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from '../vendor/BufferGeometryUtils.js';
+import { mergeGeometries } from '../vendor/BufferGeometryUtils.js?v=9';
 
 // Alle Fahrzeuge schauen nach -Z, rechts ist +X, oben +Y.
 

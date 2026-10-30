@@ -1,15 +1,15 @@
 import * as THREE from 'three';
-import { World, waveHeight } from './world.js';
-import { Effects } from './effects.js';
-import { Sound } from './audio.js';
-import { Game, TEAM_NAMES, STREAKS, PER_TEAM } from './game.js';
-import { DEFS, CALIBERS, PLANES, SHIPS } from './vehicles.js';
-import { buildModel } from './models.js';
-import { Hud, vehicleCardHtml, vehicleDetailsHtml, esc } from './hud.js';
-import { clamp, elevationFor, fmtTime } from './util.js';
-import { createPipeline } from './render.js';
-import { NetHost, NetClient, ClientGame, findRandom, makeCode, normalizeCode } from './net.js';
-import { splitLogo, screenIn, cardsIn, detailsIn, countUp, resultIn, hudIn, bindUiSounds, camoTransition } from './ui.js';
+import { World, waveHeight } from './world.js?v=9';
+import { Effects } from './effects.js?v=9';
+import { Sound } from './audio.js?v=9';
+import { Game, TEAM_NAMES, STREAKS, PER_TEAM } from './game.js?v=9';
+import { DEFS, CALIBERS, PLANES, SHIPS } from './vehicles.js?v=9';
+import { buildModel } from './models.js?v=9';
+import { Hud, vehicleCardHtml, vehicleDetailsHtml, esc } from './hud.js?v=9';
+import { clamp, elevationFor, fmtTime } from './util.js?v=9';
+import { createPipeline } from './render.js?v=9';
+import { NetHost, NetClient, ClientGame, findRandom, makeCode, normalizeCode } from './net.js?v=9';
+import { splitLogo, screenIn, cardsIn, detailsIn, countUp, resultIn, hudIn, bindUiSounds, camoTransition } from './ui.js?v=9';
 
 const $ = (id) => document.getElementById(id);
 

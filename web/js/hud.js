@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { fmtTime, clamp } from './util.js';
-import { MAP_HALF } from './world.js';
-import { DEFS } from './vehicles.js';
-import { toastIn, feedIn, feedOut, killBanner, pop, flash, hpGhost, deathIn } from './ui.js';
+import { fmtTime, clamp } from './util.js?v=9';
+import { MAP_HALF } from './world.js?v=9';
+import { DEFS } from './vehicles.js?v=9';
+import { toastIn, feedIn, feedOut, killBanner, pop, flash, hpGhost, deathIn } from './ui.js?v=9';
 
 const $ = (id) => document.getElementById(id);
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

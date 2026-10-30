@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { buildModel } from './models.js';
-import { waveHeight, MAP_HALF } from './world.js';
-import { clamp, angleDiff, elevationFor, rand } from './util.js';
+import { buildModel } from './models.js?v=9';
+import { waveHeight, MAP_HALF } from './world.js?v=9';
+import { clamp, angleDiff, elevationFor, rand } from './util.js?v=9';
 
 export const DEFS = {
   falke: {

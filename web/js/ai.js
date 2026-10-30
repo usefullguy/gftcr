@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { clamp, angleDiff, rand, elevationFor } from './util.js';
-import { CALIBERS } from './vehicles.js';
-import { MAP_HALF } from './world.js';
+import { clamp, angleDiff, rand, elevationFor } from './util.js?v=9';
+import { CALIBERS } from './vehicles.js?v=9';
+import { MAP_HALF } from './world.js?v=9';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 

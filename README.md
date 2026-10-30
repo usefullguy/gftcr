@@ -67,6 +67,8 @@ web/
 
 Grafikstufe „Niedrig“ schaltet Nachbearbeitung, Schatten und Explosionslichter ab, für ältere Schul-PCs.
 
+Alle Dateien werden mit `?v=N` eingebunden, damit Browser nach einem Update keine alten Module aus dem Cache mischen. Bei jeder Veröffentlichung `N` erhöhen (in `web/index.html` und in allen `import`-Zeilen unter `web/js/`).
+
 Für automatisierte Tests gibt es `index.html?debug` (stellt `window.__dbg` bereit).
 
 ## Veröffentlichen
