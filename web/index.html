@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sturmflut</title>
+  <meta name="description" content="Luft- und Seegefechte im Browser. Flugzeuge und Schiffe, Gegner sind KI.">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <canvas id="overlay"></canvas>
+
+  <div id="loading" class="screen">
+    <div class="logo">STURMFLUT</div>
+    <p class="muted">Lädt …</p>
+  </div>
+
+  <!-- Hauptmenü -->
+  <div id="menu" class="screen" hidden>
+    <div class="menu-side">
+      <div class="logo">STURMFLUT</div>
+      <p class="tagline">Luft- und Seegefechte</p>
+      <nav class="menu-buttons">
+        <button data-go="hangar" class="primary">Gefecht</button>
+        <button data-go="controls">Steuerung</button>
+        <button data-go="settings">Einstellungen</button>
+      </nav>
+      <p class="muted small">7 gegen 7. Erobert die Zonen A, B und C mit Schiffen, holt den Gegner aus der Luft. Wer zuerst keine Punkte mehr hat, verliert.</p>
+    </div>
+  </div>
+
+  <!-- Fahrzeugwahl, auch beim Wiedereinstieg -->
+  <div id="hangar" class="screen" hidden>
+    <div class="panel hangar-panel">
+      <header class="hangar-head">
+        <h2 id="hangarTitle">Fahrzeug wählen</h2>
+        <div class="tabs">
+          <button data-tab="plane" class="tab active">Flugzeuge</button>
+          <button data-tab="ship" class="tab">Schiffe</button>
+        </div>
+      </header>
+      <div id="cards" class="cards"></div>
+      <div id="details" class="details"></div>
+      <footer class="hangar-foot">
+        <button id="hangarBack">Zurück</button>
+        <span id="respawnTimer" class="muted"></span>
+        <button id="deploy" class="primary">Ins Gefecht</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="controls" class="screen" hidden>
+    <div class="panel narrow">
+      <h2>Steuerung</h2>
+      <h3>Flugzeug</h3>
+      <table class="keys">
+        <tr><td>Maus</td><td>Zielrichtung, das Flugzeug fliegt dorthin</td></tr>
+        <tr><td>Linke Maustaste</td><td>Bordwaffen</td></tr>
+        <tr><td>Rechte Maustaste / Leertaste</td><td>Bomben oder Raketen</td></tr>
+        <tr><td>W / S</td><td>Schub</td></tr>
+        <tr><td>A / D</td><td>Rollen (zusätzlich zur Maus)</td></tr>
+        <tr><td>C halten</td><td>Umschauen</td></tr>
+      </table>
+      <h3>Schiff</h3>
+      <table class="keys">
+        <tr><td>W / S</td><td>Fahrstufe hoch / runter</td></tr>
+        <tr><td>A / D</td><td>Ruder</td></tr>
+        <tr><td>Maus</td><td>Zielen, die Türme drehen nach</td></tr>
+        <tr><td>Linke Maustaste</td><td>Feuer (bereite Türme)</td></tr>
+        <tr><td>Rechte Maustaste / Leertaste</td><td>Torpedos</td></tr>
+      </table>
+      <h3>Allgemein</h3>
+      <table class="keys">
+        <tr><td>Shift halten</td><td>Zoom</td></tr>
+        <tr><td>Mausrad</td><td>Kameraabstand</td></tr>
+        <tr><td>F</td><td>Sperrfeuer anfordern (nach 7er-Serie)</td></tr>
+        <tr><td>Tab</td><td>Punktetabelle</td></tr>
+        <tr><td>Esc</td><td>Pause</td></tr>
+      </table>
+      <h3>Serien</h3>
+      <p class="muted small">Abschüsse ohne selbst abgeschossen zu werden:<br>
+        2 – Feldreparatur · 3 – Habicht und Zerstörer frei · 4 – Begleitschutz · 5 – Bussard und Kreuzer frei · 7 – Sperrfeuer</p>
+      <button data-go="menu">Zurück</button>
+    </div>
+  </div>
+
+  <div id="settings" class="screen" hidden>
+    <div class="panel narrow">
+      <h2>Einstellungen</h2>
+      <label class="row">Name <input id="setName" maxlength="16"></label>
+      <label class="row">KI-Stärke
+        <select id="setDifficulty">
+          <option value="leicht">Leicht</option>
+          <option value="normal">Normal</option>
+          <option value="schwer">Schwer</option>
+        </select>
+      </label>
+      <label class="row">Grafik
+        <select id="setQuality">
+          <option value="niedrig">Niedrig (alte PCs)</option>
+          <option value="mittel">Mittel</option>
+          <option value="hoch">Hoch</option>
+        </select>
+      </label>
+      <label class="row">Mausempfindlichkeit <input id="setSens" type="range" min="0.3" max="2.5" step="0.05"></label>
+      <label class="row">Maus-Y umkehren <input id="setInvert" type="checkbox"></label>
+      <label class="row">Lautstärke <input id="setVolume" type="range" min="0" max="1" step="0.05"></label>
+      <p class="muted small" id="qualityNote" hidden>Die Grafikstufe wird beim nächsten Laden der Seite übernommen.</p>
+      <div class="row-buttons">
+        <button data-go="menu">Zurück</button>
+        <button id="resetUnlocks" class="danger">Freischaltungen zurücksetzen</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pause" class="screen dim" hidden>
+    <div class="panel narrow center">
+      <h2>Pause</h2>
+      <button id="resume" class="primary">Weiter</button>
+      <button data-go="controls-ingame">Steuerung</button>
+      <button id="quit">Gefecht verlassen</button>
+    </div>
+  </div>
+
+  <div id="result" class="screen dim" hidden>
+    <div class="panel narrow center">
+      <h2 id="resultTitle">Sieg</h2>
+      <p id="resultSub" class="muted"></p>
+      <table class="stats" id="resultStats"></table>
+      <div class="row-buttons">
+        <button id="again" class="primary">Noch ein Gefecht</button>
+        <button data-go="menu">Hauptmenü</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" hidden>
+    <div id="topbar">
+      <div class="tk tk-blue"><b id="tkBlue">800</b><div class="bar"><i id="tkBlueBar"></i></div></div>
+      <div id="zones"></div>
+      <div class="tk tk-red"><div class="bar"><i id="tkRedBar"></i></div><b id="tkRed">800</b></div>
+    </div>
+    <div id="timer">15:00</div>
+    <div id="feed"></div>
+    <div id="toasts"></div>
+    <div id="warning" hidden></div>
+    <div id="vehpanel">
+      <div class="vp-name"><span id="vpName"></span><span id="vpStreak"></span></div>
+      <div class="hpbar"><i id="vpHp"></i></div>
+      <div class="vp-rows" id="vpRows"></div>
+    </div>
+    <canvas id="minimap" width="200" height="200"></canvas>
+    <div id="scoreboard" hidden></div>
+    <div id="vignette"></div>
+    <div id="deathmsg" hidden></div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
