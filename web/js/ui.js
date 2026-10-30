@@ -5,31 +5,19 @@ const gsap = window.gsap;
 const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const on = !!gsap && !reduced;
 
-export function splitLogo() {
-  document.querySelectorAll('.logo').forEach((el) => {
-    if (el.dataset.split) return;
-    el.dataset.split = '1';
-    el.innerHTML = [...el.textContent].map((c) => `<span class="ch">${c}</span>`).join('');
-  });
-}
+export function splitLogo() {}
 
 export function screenIn(el) {
   if (!on || !el) return;
   gsap.killTweensOf(el.querySelectorAll('*'));
   if (el.id === 'menu') {
-    const chars = el.querySelectorAll('.logo .ch');
-    gsap.fromTo(chars, { y: 28, opacity: 0, rotateX: -70 }, { y: 0, opacity: 1, rotateX: 0, duration: 0.7, stagger: 0.045, ease: 'back.out(1.6)' });
-    gsap.fromTo(el.querySelector('.tagline'), { opacity: 0, letterSpacing: '0.6em' }, { opacity: 1, letterSpacing: '0.3em', duration: 0.9, delay: 0.25, ease: 'power3.out' });
-    gsap.fromTo(el.querySelectorAll('.menu-nav > .nav, .nav-row'), { x: -40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, stagger: 0.07, delay: 0.3, ease: 'power3.out' });
-    gsap.fromTo(el.querySelector('.topbar'), { y: -30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: 'power3.out' });
-    gsap.fromTo(el.querySelector('.report'), { x: 40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, delay: 0.5, ease: 'power3.out' });
+    gsap.fromTo(el.querySelector('.menu-side'), { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.4, ease: 'power2.out' });
+    gsap.fromTo(el.querySelector('.report'), { opacity: 0 }, { opacity: 1, duration: 0.4, delay: 0.15 });
     return;
   }
   const panel = el.querySelector('.panel');
   if (!panel) return;
-  gsap.fromTo(panel, { y: 24, opacity: 0, scale: 0.985 }, { y: 0, opacity: 1, scale: 1, duration: 0.42, ease: 'power3.out' });
-  const items = panel.querySelectorAll('.kicker, h2, h3, .row, table, .tabs, .row-buttons, .panel.center > button, .hangar-foot, .team, .code-box, .code-input, .radar');
-  gsap.fromTo(items, { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, stagger: 0.025, delay: 0.08, ease: 'power2.out' });
+  gsap.fromTo(panel, { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: 'power2.out' });
 }
 
 export function cardsIn(container) {

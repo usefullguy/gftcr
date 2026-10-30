@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { fbm, mulberry32 } from './util.js?v=9';
+import { fbm, mulberry32 } from './util.js?v=11';
+import { City, CITY_HALF } from './city.js?v=11';
 
 export const MAP_HALF = 3800;
 export const SUN_DIR = new THREE.Vector3(-0.45, 0.6, -0.66).normalize();
@@ -46,6 +47,12 @@ export class World {
     this.time = 0;
     this.seaTime = { value: 0 };
     this.islands = ISLANDS.map((o, i) => ({ ...o, seed: i * 13.7 }));
+    this.map = 'sea';
+    this.half = MAP_HALF;
+    this.seaGroup = new THREE.Group();
+    this.cityGroup = null;
+    this.city = null;
+    scene.add(this.seaGroup);
     this.buildSky();
     this.buildLights();
     this.buildSea();
@@ -53,7 +60,24 @@ export class World {
     this.buildClouds();
   }
 
+  // Karte wechseln: 'sea' (Inselmeer) oder 'city' (Stadt)
+  setMap(map) {
+    if (map === this.map) return;
+    this.map = map;
+    if (map === 'city' && !this.city) {
+      this.cityGroup = new THREE.Group();
+      this.city = new City(this.cityGroup, this.quality);
+      this.scene.add(this.cityGroup);
+    }
+    this.seaGroup.visible = map === 'sea';
+    if (this.cityGroup) this.cityGroup.visible = map === 'city';
+    this.half = map === 'city' ? CITY_HALF : MAP_HALF;
+    this.scene.fog.near = map === 'city' ? 500 : 1800;
+    this.scene.fog.far = map === 'city' ? 3200 : 11000;
+  }
+
   heightAt(x, z) {
+    if (this.map === 'city') return this.city.heightAt(x, z);
     let h = -40;
     for (const is of this.islands) {
       const dx = x - is.x, dz = z - is.z;
@@ -68,6 +92,10 @@ export class World {
   // Boden- bzw. Wasserhöhe für Kollisionen
   groundAt(x, z) {
     return Math.max(0, this.heightAt(x, z));
+  }
+
+  lineOfSight(a, b) {
+    return this.map === 'city' ? this.city.lineOfSight(a, b) : true;
   }
 
   buildSky() {
@@ -154,12 +182,12 @@ export class World {
     this.sea = new THREE.Mesh(geo, mat);
     this.sea.receiveShadow = this.quality === 'hoch';
     this.sea.frustumCulled = false;
-    this.scene.add(this.sea);
+    this.seaGroup.add(this.sea);
 
     // Gleiches Material wie die Wellenfläche, damit am Übergang keine Kante entsteht
     const far = new THREE.Mesh(new THREE.PlaneGeometry(90000, 90000, 8, 8).rotateX(-Math.PI / 2), mat);
     far.position.y = -3.5;
-    this.scene.add(far);
+    this.seaGroup.add(far);
   }
 
   buildIslands() {
@@ -204,7 +232,7 @@ export class World {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(is.x, 0, is.z);
       mesh.castShadow = true; mesh.receiveShadow = true;
-      this.scene.add(mesh);
+      this.seaGroup.add(mesh);
 
       const trees = Math.round(is.r * (this.quality === 'niedrig' ? 0.35 : 0.8));
       for (let t = 0, placed = 0; t < trees * 3 && placed < trees && treeSpots.length < 6000; t++) {
@@ -239,7 +267,7 @@ export class World {
       trees.setMatrixAt(i, m);
     });
     trees.castShadow = true;
-    this.scene.add(trees);
+    this.seaGroup.add(trees);
 
     const houseGeo = new THREE.BoxGeometry(10, 6, 14);
     houseGeo.translate(0, 3, 0);
@@ -255,7 +283,7 @@ export class World {
       houses.setMatrixAt(i, m); roofs.setMatrixAt(i, m);
     });
     houses.castShadow = roofs.castShadow = true;
-    this.scene.add(houses, roofs);
+    this.seaGroup.add(houses, roofs);
   }
 
   buildClouds() {
@@ -287,7 +315,7 @@ export class World {
     this.time += dt;
     this.seaTime.value = this.time;
     const c = this.seaCell;
-    this.sea.position.set(Math.round(camera.position.x / c) * c, 0, Math.round(camera.position.z / c) * c);
+    if (this.map === 'sea') this.sea.position.set(Math.round(camera.position.x / c) * c, 0, Math.round(camera.position.z / c) * c);
     this.sky.position.copy(camera.position);
     if (this.sun.castShadow) {
       this.sun.target.position.copy(focus);

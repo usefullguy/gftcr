@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rand } from './util.js?v=9';
+import { rand } from './util.js?v=11';
 
 const ROTS = Array.from({ length: 32 }, () =>
   new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(0, 6.3), rand(0, 6.3), rand(0, 6.3))));
@@ -86,6 +86,7 @@ const C = (h) => new THREE.Color(h);
 // Feuerfarben liegen über 1.0, damit der Bloom-Effekt sie leuchten lässt
 const FIRE_A = C(0xfff3b0).multiplyScalar(6), FIRE_B = C(0xff7a1a).multiplyScalar(3.2), FIRE_C = C(0xc0300c).multiplyScalar(1.4), EMBER = C(0xff6a20).multiplyScalar(2.2);
 const SMOKE_D = C(0x2a2826), SMOKE_G = C(0x6e6a66), SMOKE_L = C(0xa8a6a2);
+const DUST = C(0xa89c80), DUST2 = C(0x8b8470);
 const WHITE = C(0xf4f8fb), FOAM = C(0xd9e8ef), SEA = C(0x8fb9cf);
 
 export class Effects {
@@ -203,6 +204,10 @@ export class Effects {
 
   trail(p, dark = false, size = 1) {
     this.smoke.spawn(p.x, p.y, p.z, rand(-0.5, 0.5), rand(-0.5, 0.5), rand(-0.5, 0.5), dark ? 2.5 : 1.0, 0.6 * size, (dark ? 2.6 : 1.6) * size, dark ? SMOKE_D : SMOKE_L, SMOKE_G, 0.5, -0.5);
+  }
+
+  dust(p, size) {
+    this.smoke.spawn(p.x + rand(-0.5, 0.5), p.y, p.z + rand(-0.5, 0.5), rand(-1, 1), rand(0.5, 2), rand(-1, 1), rand(1.2, 2.2), size, size * 3, DUST, DUST2, 1.5, -0.3);
   }
 
   wake(p, size) {

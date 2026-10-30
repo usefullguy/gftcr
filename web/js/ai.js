@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { clamp, angleDiff, rand, elevationFor } from './util.js?v=9';
-import { CALIBERS } from './vehicles.js?v=9';
-import { MAP_HALF } from './world.js?v=9';
+import { clamp, angleDiff, rand, elevationFor } from './util.js?v=11';
+import { CALIBERS } from './vehicles.js?v=11';
+import { MAP_HALF } from './world.js?v=11';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 
@@ -317,6 +317,125 @@ export class ShipAI {
       _v.copy(t.vel).multiplyScalar(tof).add(t.pos);
       c.aimPoint = _v.clone();
       c.torp = true;
+    }
+  }
+}
+
+export class TankAI {
+  constructor(unit, game) {
+    this.u = unit;
+    this.game = game;
+    this.zone = null;
+    this.rezone = 0;
+    this.target = null;
+    this.retarget = 0;
+    this.err = new THREE.Vector3();
+    this.reerr = 0;
+    this.aim = new THREE.Vector3();
+    this.wp = null;
+    this.stuckT = 0;
+    this.reverseT = 0;
+    this.reverseSteer = 1;
+    this.offset = new THREE.Vector3(rand(-50, 50), 0, rand(-50, 50));
+    this.escortOf = null;
+  }
+
+  pickZone() {
+    const u = this.u, g = this.game;
+    let best = null, bestScore = Infinity;
+    for (const z of g.zones) {
+      let score = Math.hypot(z.x - u.pos.x, z.z - u.pos.z);
+      if (z.owner === u.team) score += 1200;
+      score += g.units.filter((o) => o !== u && o.alive && o.team === u.team && o.ai && o.ai.zone === z).length * 500;
+      if (score < bestScore) { bestScore = score; best = z; }
+    }
+    return best;
+  }
+
+  update(dt) {
+    const u = this.u, g = this.game, c = u.ctrl, w = g.world;
+    if (!u.alive) return;
+    const skill = g.skill;
+    const C = w.city ? 130 : 200;
+
+    // Ziel suchen: nächster sichtbarer Gegner
+    this.retarget -= dt;
+    if (this.retarget <= 0) {
+      this.retarget = rand(0.6, 1.2);
+      const eye = _v.set(u.pos.x, 2.4, u.pos.z);
+      let best = null, bd = 950 * 950;
+      for (const e of g.units) {
+        if (!e.alive || e.removed || e.team === u.team) continue;
+        const d = e.pos.distanceToSquared(u.pos);
+        if (d < bd && w.lineOfSight(eye, _v2.set(e.pos.x, 1.8, e.pos.z))) { bd = d; best = e; }
+      }
+      this.target = best;
+    }
+
+    c.fire = false;
+    c.aimPoint = null;
+    let engage = false;
+    const t = this.target;
+    if (t && t.alive) {
+      const dist = u.pos.distanceTo(t.pos);
+      this.reerr -= dt;
+      if (this.reerr <= 0) {
+        const s = 1.5 + dist * 0.012 * (1.2 - skill);
+        this.err.set(rand(-s, s), rand(-0.6, 0.6), rand(-s, s));
+        this.reerr = u.cal.reload * 0.8;
+      }
+      const tof = dist / u.cal.speed;
+      this.aim.copy(t.vel).multiplyScalar(tof * (0.5 + skill * 0.5)).add(t.pos).add(this.err);
+      this.aim.y = 1.4;
+      c.aimPoint = this.aim;
+      c.fire = u.turret.ready;
+      engage = dist < 650;
+    }
+
+    // Wohin fahren?
+    this.rezone -= dt;
+    if (this.rezone <= 0 || !this.zone) { this.zone = this.pickZone(); this.rezone = rand(8, 14); }
+    let gx = this.zone.x + this.offset.x, gz = this.zone.z + this.offset.z;
+    if (this.escortOf && this.escortOf.alive) { gx = this.escortOf.pos.x; gz = this.escortOf.pos.z; }
+    const dGoal = Math.hypot(gx - u.pos.x, gz - u.pos.z);
+
+    let tx = gx, tz = gz;
+    if (dGoal > C * 0.9) {
+      // Über das Straßenraster: Kreuzung für Kreuzung
+      const ix = Math.round(u.pos.x / C), iz = Math.round(u.pos.z / C);
+      if (!this.wp || Math.hypot(this.wp.x - u.pos.x, this.wp.z - u.pos.z) < 12) {
+        const near = Math.hypot(ix * C - u.pos.x, iz * C - u.pos.z) < 14;
+        if (!near) this.wp = { x: ix * C, z: iz * C };
+        else {
+          const dx = Math.round(gx / C) - ix, dz = Math.round(gz / C) - iz;
+          const stepX = Math.abs(dx) > Math.abs(dz) || (Math.abs(dx) === Math.abs(dz) && Math.random() < 0.5);
+          this.wp = stepX ? { x: (ix + Math.sign(dx)) * C, z: iz * C } : { x: ix * C, z: (iz + Math.sign(dz)) * C };
+        }
+      }
+      tx = this.wp.x; tz = this.wp.z;
+    } else {
+      this.wp = null;
+    }
+
+    const desired = Math.atan2(-(tx - u.pos.x), -(tz - u.pos.z));
+    const diff = angleDiff(u.heading, desired);
+    c.steer = clamp(-diff * 2.5, -1, 1);
+    c.throttle = Math.abs(diff) > 0.9 ? 0.1 : Math.abs(diff) > 0.4 ? 0.5 : 1;
+    if (dGoal < (this.zone.r || 100) * 0.5 && !this.escortOf) { c.throttle = 0; c.steer = 0; }
+    if (this.escortOf && dGoal < 40) c.throttle = 0;
+    if (engage) c.throttle = Math.min(c.throttle, 0.35);
+
+    // Festgefahren? Kurz zurücksetzen
+    if (this.reverseT > 0) {
+      this.reverseT -= dt;
+      c.throttle = -0.7;
+      c.steer = this.reverseSteer;
+      this.wp = null;
+    } else if (c.throttle > 0.3 && Math.abs(u.speed) < 0.8) {
+      this.stuckT += dt;
+      if (this.stuckT > 1.5) { this.stuckT = 0; this.reverseT = 1.4; this.reverseSteer = Math.random() < 0.5 ? -1 : 1; }
+    } else {
+      this.stuckT = 0;
     }
   }
 }

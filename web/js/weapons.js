@@ -65,7 +65,7 @@ export class Projectiles {
     p.type = type;
     p.pos.copy(pos); p.prev.copy(pos); p.vel.copy(vel);
     p.owner = owner; p.team = owner.team;
-    p.dmg = o.dmg; p.splash = o.splash || 0; p.life = o.life; p.size = o.size || 1; p.flak = !!o.flak;
+    p.dmg = o.dmg; p.splash = o.splash || 0; p.life = o.life; p.size = o.size || 1; p.flak = !!o.flak; p.torp = !!o.torp;
     p.travel = 0; p.dead = false;
     this.list.push(p);
     return p;
@@ -116,7 +116,13 @@ export class Projectiles {
       const ground = game.world.heightAt(p.pos.x, p.pos.z);
       if (p.pos.y <= 0 && ground < 0) {
         if (p.type === 'bullet') { if (Math.random() < 0.35) fx.smallSplash(p.pos); }
-        else {
+        else if (p.torp) {
+          // Lufttorpedo: läuft nach dem Eintauchen in Flugrichtung weiter
+          fx.splash(p.pos, 2.5);
+          game.audio.splash(p.pos);
+          const dir = _d.set(p.vel.x, 0, p.vel.z).normalize();
+          this.fire('torpedo', _v.set(p.pos.x, -1.2, p.pos.z), dir.multiplyScalar(40), p.owner, { dmg: p.dmg, life: 50, size: 1 });
+        } else {
           fx.splash(p.pos, p.type === 'bomb' ? 4 : p.type === 'shell' ? 0.8 + p.size * 1.6 : 1.4);
           if (p.type === 'bomb') { fx.explosion(_v.set(p.pos.x, 1, p.pos.z), 2); game.audio.boom(2, p.pos); }
           else game.audio.splash(p.pos);

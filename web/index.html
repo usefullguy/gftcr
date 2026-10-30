@@ -7,19 +7,30 @@
   <meta name="description" content="Luft- und Seegefechte im Browser. Allein gegen KI oder mit Freunden über Raumcode.">
   <link rel="preload" href="fonts/black-ops-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/rajdhani-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="css/style.css?v=9">
-  <script src="vendor/gsap.min.js?v=9"></script>
-  <script src="vendor/peerjs.min.js?v=9"></script>
+  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css?v=11">
+  <script src="vendor/gsap.min.js?v=11"></script>
+  <script src="vendor/peerjs.min.js?v=11"></script>
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.min.js" } }
   </script>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="logo-mark" viewBox="0 0 120 100">
+      <path d="M57.5 13 Q60 3 62.5 13 V50 H57.5 Z"/>
+      <path d="M60 19 L99 27.5 V32.5 L60 29 L21 32.5 V27.5 Z"/>
+      <path d="M60 41.5 L73 44.5 V48 L60 46.5 L47 48 V44.5 Z"/>
+      <path d="M38 66 V57 H50 V50 H70 V57 H82 V66 Z"/>
+      <path d="M4 66 H116 L103 81 H13 Z"/>
+      <path d="M6 90 q7 -5 14 0 t14 0 t14 0 t14 0 t14 0 t14 0 t14 0 t14 0" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+    </symbol>
+  </svg>
   <canvas id="game"></canvas>
   <canvas id="overlay"></canvas>
-  <div id="fxlayer"></div>
 
   <div id="loading" class="screen">
+    <svg class="mark" viewBox="0 0 120 100" aria-hidden="true"><use href="#logo-mark"/></svg>
     <div class="logo">STURMFLUT</div>
     <p class="muted" id="loadText">Lädt …</p>
     <p class="error" id="loadError" hidden></p>
@@ -28,7 +39,7 @@
   <!-- Hauptmenü -->
   <div id="menu" class="screen" hidden>
     <header class="topbar">
-      <div class="brand"><span class="brand-mark"></span>STURMFLUT</div>
+      <div class="brand"><svg class="mark" viewBox="0 0 120 100" aria-hidden="true"><use href="#logo-mark"/></svg>STURMFLUT</div>
       <div class="profile">
         <span class="rank" id="profRank">Rekrut</span>
         <b id="profName">Spieler</b>
@@ -36,8 +47,8 @@
       </div>
     </header>
     <div class="menu-side">
-      <div class="logo">STURMFLUT</div>
-      <p class="tagline">Luft- und Seegefechte</p>
+      <div class="logo-lockup"><svg class="mark" viewBox="0 0 120 100" aria-hidden="true"><use href="#logo-mark"/></svg><div class="logo">STURMFLUT</div></div>
+      <p class="tagline">Luft-, See- und Stadtgefechte</p>
       <nav class="menu-nav">
         <button data-go="random" class="nav primary"><i>01</i><span>Schnelles Gefecht<small>Online mit zufälligen Spielern</small></span></button>
         <button data-go="host" class="nav"><i>02</i><span>Raum erstellen<small>Code an Freunde schicken</small></span></button>
@@ -68,15 +79,22 @@
           <span class="kicker" id="hangarKicker">Training</span>
           <h2 id="hangarTitle">Fahrzeug wählen</h2>
         </div>
-        <div class="tabs">
-          <button data-tab="plane" class="tab active">Flugzeuge</button>
-          <button data-tab="ship" class="tab">Schiffe</button>
+        <div class="mapswitch" id="mapSwitch">
+          <button data-map="sea">Inselmeer</button>
+          <button data-map="city">Stadt</button>
         </div>
+        <div class="tabs" id="tabs"></div>
       </header>
-      <div id="cards" class="cards"></div>
-      <div id="details" class="details"></div>
+      <div class="hangar-body">
+        <div id="cards" class="vlist" role="listbox" aria-label="Fahrzeuge"></div>
+        <div class="vpreview">
+          <img id="previewImg" alt="">
+          <div id="details" class="details"></div>
+        </div>
+      </div>
       <footer class="hangar-foot">
         <button id="hangarBack">Zurück</button>
+        <span class="keys-hint"><b>↑ ↓</b> wählen · <b>← →</b> Kategorie · <b>Enter</b> einsteigen</span>
         <span id="respawnTimer" class="muted"></span>
         <button id="deploy" class="primary big">Ins Gefecht</button>
       </footer>
@@ -134,6 +152,12 @@
             <option value="versus">Gegeneinander (Lücken mit KI)</option>
           </select>
         </label>
+        <label class="row">Karte
+          <select id="optMap">
+            <option value="sea">Inselmeer (Flugzeuge und Schiffe)</option>
+            <option value="city">Stadt (Panzer)</option>
+          </select>
+        </label>
         <label class="row">KI-Stärke
           <select id="optDiff">
             <option value="leicht">Leicht</option>
@@ -155,34 +179,44 @@
     <div class="panel narrow">
       <span class="kicker">Handbuch</span>
       <h2>Steuerung</h2>
+      <p class="muted small">Alles geht nur mit Tastatur. Die Maus ist optional.</p>
       <h3>Flugzeug</h3>
       <table class="keys">
-        <tr><td>Maus</td><td>Zielrichtung, das Flugzeug fliegt dorthin</td></tr>
-        <tr><td>Linke Maustaste</td><td>Bordwaffen</td></tr>
-        <tr><td>Rechte Maustaste / Leertaste</td><td>Bomben oder Raketen</td></tr>
+        <tr><td>Pfeil hoch / runter</td><td>Nase runter / ziehen</td></tr>
+        <tr><td>Pfeil links / rechts</td><td>Rollen</td></tr>
+        <tr><td>A / D</td><td>Seitenruder</td></tr>
         <tr><td>W / S</td><td>Schub</td></tr>
-        <tr><td>A / D</td><td>Rollen (zusätzlich zur Maus)</td></tr>
-        <tr><td>C halten</td><td>Umschauen</td></tr>
+        <tr><td>Leertaste</td><td>Bordwaffen</td></tr>
+        <tr><td>E</td><td>Bomben, Raketen oder Torpedo</td></tr>
+        <tr><td>Mit Maus</td><td>Flugzeug fliegt dorthin, wo du hinschaust</td></tr>
       </table>
       <h3>Schiff</h3>
       <table class="keys">
         <tr><td>W / S</td><td>Fahrstufe hoch / runter</td></tr>
         <tr><td>A / D</td><td>Ruder</td></tr>
-        <tr><td>Maus</td><td>Zielen, die Türme drehen nach</td></tr>
-        <tr><td>Linke Maustaste</td><td>Feuer (bereite Türme)</td></tr>
-        <tr><td>Rechte Maustaste / Leertaste</td><td>Torpedos</td></tr>
+        <tr><td>Pfeiltasten</td><td>Zielen (Richtung und Entfernung)</td></tr>
+        <tr><td>Leertaste</td><td>Feuer</td></tr>
+        <tr><td>E</td><td>Torpedos</td></tr>
+      </table>
+      <h3>Panzer</h3>
+      <table class="keys">
+        <tr><td>W / S</td><td>Vorwärts / rückwärts</td></tr>
+        <tr><td>A / D</td><td>Drehen</td></tr>
+        <tr><td>Pfeiltasten</td><td>Turm und Rohr</td></tr>
+        <tr><td>Leertaste</td><td>Feuer</td></tr>
       </table>
       <h3>Allgemein</h3>
       <table class="keys">
         <tr><td>Shift halten</td><td>Zoom</td></tr>
-        <tr><td>Mausrad</td><td>Kameraabstand</td></tr>
+        <tr><td>C halten</td><td>Umschauen (Maus)</td></tr>
         <tr><td>F</td><td>Sperrfeuer anfordern (nach 7er-Serie)</td></tr>
         <tr><td>Tab</td><td>Punktetabelle</td></tr>
         <tr><td>Esc</td><td>Pause</td></tr>
+        <tr><td>Im Hangar</td><td>Pfeile wählen, Enter steigt ein</td></tr>
       </table>
       <h3>Serien</h3>
-      <p class="muted small">Abschüsse ohne selbst abgeschossen zu werden:<br>
-        2 – Feldreparatur · 3 – Habicht und Zerstörer frei · 4 – Begleitschutz · 5 – Bussard und Kreuzer frei · 7 – Sperrfeuer</p>
+      <p class="muted small">Abschüsse am Stück, ohne selbst abgeschossen zu werden, schalten Fahrzeuge frei (3 bis 7 je nach Fahrzeug).
+        Dazu: 2 – Feldreparatur · 4 – zwei Begleiter · 7 – Sperrfeuer.</p>
       <button data-go="back">Zurück</button>
     </div>
   </div>
@@ -260,9 +294,9 @@
       <div class="hpbar"><i id="vpHpGhost"></i><i id="vpHp"></i><span class="hp-seg"></span></div>
     </div>
     <div id="weaponpanel">
-      <div class="wp-big"><b id="wpBig">0</b><span id="wpBigUnit"></span></div>
       <div class="vp-rows" id="vpRows"></div>
     </div>
+    <div id="keyhint" hidden></div>
     <canvas id="minimap" width="200" height="200"></canvas>
     <div id="scoreboard" hidden></div>
     <div id="vignette"></div>
@@ -272,8 +306,7 @@
 
   <!-- Tarnmuster-Übergang -->
   <div id="camo" aria-hidden="true">
-    <div class="camo-edge"></div>
-    <div class="camo-label"><b>STURMFLUT</b><span id="camoText"></span></div>
+    <div class="camo-label"><svg class="mark" viewBox="0 0 120 100" aria-hidden="true"><use href="#logo-mark"/></svg><b>STURMFLUT</b><span id="camoText"></span></div>
   </div>
 
   <script>
@@ -295,6 +328,6 @@
       if (!HTMLScriptElement.supports || !HTMLScriptElement.supports('importmap')) fail('Dieser Browser ist zu alt (keine Import-Maps)');
     })();
   </script>
-  <script type="module" src="js/main.js?v=9" onerror="this.dispatchEvent(new ErrorEvent('error', { message: 'js/main.js nicht gefunden' }))"></script>
+  <script type="module" src="js/main.js?v=11" onerror="this.dispatchEvent(new ErrorEvent('error', { message: 'js/main.js nicht gefunden' }))"></script>
 </body>
 </html>

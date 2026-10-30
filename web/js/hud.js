@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { fmtTime, clamp } from './util.js?v=9';
-import { MAP_HALF } from './world.js?v=9';
-import { DEFS } from './vehicles.js?v=9';
-import { toastIn, feedIn, feedOut, killBanner, pop, flash, hpGhost, deathIn } from './ui.js?v=9';
+import { fmtTime, clamp } from './util.js?v=11';
+import { MAP_HALF } from './world.js?v=11';
+import { DEFS } from './vehicles.js?v=11';
+import { toastIn, feedIn, feedOut, killBanner, pop, flash, hpGhost, deathIn } from './ui.js?v=11';
 
 const $ = (id) => document.getElementById(id);
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -47,27 +47,33 @@ export class Hud {
     });
     $('feed').innerHTML = '';
     $('toasts').innerHTML = '';
+    this.world = world;
     this.buildMinimapBg(world);
   }
 
   buildMinimapBg(world) {
-    if (this.miniBg) return;
+    this.miniBgs = this.miniBgs || {};
+    if (this.miniBgs[world.map]) { this.miniBg = this.miniBgs[world.map]; return; }
+    const HALF = world.half, city = world.map === 'city';
     const size = 200, c = document.createElement('canvas');
     c.width = c.height = size;
     const g = c.getContext('2d');
     const img = g.createImageData(size, size);
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const wx = (x / size * 2 - 1) * MAP_HALF, wz = (y / size * 2 - 1) * MAP_HALF;
+        const wx = (x / size * 2 - 1) * HALF, wz = (y / size * 2 - 1) * HALF;
         const h = world.heightAt(wx, wz);
         const i = (y * size + x) * 4;
-        if (h > 6) { img.data[i] = 96; img.data[i + 1] = 128; img.data[i + 2] = 72; img.data[i + 3] = 255; }
+        if (city) {
+          const v = h > 0.5 ? 120 + Math.min(h, 50) : 0;
+          img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = h > 0.5 ? 255 : 0;
+        } else if (h > 6) { img.data[i] = 96; img.data[i + 1] = 128; img.data[i + 2] = 72; img.data[i + 3] = 255; }
         else if (h > 0) { img.data[i] = 200; img.data[i + 1] = 184; img.data[i + 2] = 130; img.data[i + 3] = 255; }
         else { img.data[i + 3] = 0; }
       }
     }
     g.putImageData(img, 0, 0);
-    this.miniBg = c;
+    this.miniBg = this.miniBgs[world.map] = c;
   }
 
   feed(killer, victim, how, player) {
@@ -75,8 +81,7 @@ export class Hud {
     const d = document.createElement('div');
     const cls = (u) => (u === player ? 'me' : u.team === 0 ? 'b' : 'r');
     const vName = `<span class="${cls(victim)}">${esc(victim.name)}</span> <span class="muted">(${victim.def.name})</span>`;
-    const ico = victim.kind === 'ship' ? '⚓' : '✈';
-    if (killer) d.innerHTML = `<span class="${cls(killer)}">${esc(killer.name)}</span><span class="ico">${ico}</span>${vName}`;
+    if (killer) d.innerHTML = `<span class="${cls(killer)}">${esc(killer.name)}</span><span class="ico">›</span>${vName}`;
     else d.innerHTML = `${vName} ${how === 'crash' ? 'abgestürzt' : 'zerstört'}`;
     f.prepend(d);
     feedIn(d);
@@ -152,8 +157,7 @@ export class Hud {
     if (p) {
       $('vpName').textContent = p.def.name;
       $('vpClass').textContent = p.def.klasse;
-      if (p.kind === 'plane') { $('wpBig').textContent = Math.round(p.speed * 3.6); $('wpBigUnit').textContent = 'km/h'; }
-      else { $('wpBig').textContent = Math.round(Math.abs(p.speed) * 1.94); $('wpBigUnit').textContent = 'kn'; }
+
       const streakEl = $('vpStreak');
       if (streakEl._v !== p.streak) { streakEl.textContent = p.streak > 0 ? `Serie ${p.streak}` : ''; if (p.streak > 0) pop(streakEl, 1.6); streakEl._v = p.streak; }
       const hpEl = $('vpHp');
@@ -185,14 +189,15 @@ export class Hud {
     const gauge = (f, cls = '') => `<span class="gauge"><i style="width:${clamp(f, 0, 1) * 100}%;${cls}"></i></span>`;
     const out = [];
     if (p.kind === 'plane') {
-      out.push(['Höhe', `${Math.round(p.pos.y)} m`]);
       out.push(['Schub', gauge(p.ctrl.throttle)]);
       out.push(['Waffen', p.overheated ? '<span class="warn">überhitzt</span>' : gauge(p.heat, p.heat > 0.7 ? 'background:var(--red)' : '')]);
       const s = p.def.secondary;
       if (s) out.push([s.name, `${p.ammo2} / ${s.count}` + (p.ammo2 < s.count ? ` <span class="muted">(${Math.ceil(s.rearm - p.rearm)} s)</span>` : '')]);
+    } else if (p.kind === 'tank') {
+      const t = p.turret;
+      out.push([p.cal.name, t.reload <= 0 ? '<span class="ok">geladen</span>' : `${Math.max(0, t.reload).toFixed(1)} s`]);
+      if (game.aimDist) out.push(['Entfernung', `${Math.round(game.aimDist)} m`]);
     } else {
-      const steps = ['Zurück', 'Stopp', '1/4', '1/2', '3/4', 'Voll'];
-      out.push(['Fahrstufe', steps[(p.throttleStep ?? 2) + 1]]);
       const ready = p.turrets.filter((t) => t.reload <= 0).length;
       const maxRel = Math.max(...p.turrets.map((t) => t.reload));
       out.push([p.cal.name, ready === p.turrets.length ? '<span class="ok">bereit</span>' : `${ready}/${p.turrets.length} · ${Math.max(0, maxRel).toFixed(1)} s`]);
@@ -232,6 +237,8 @@ export class Hud {
       const dist = cam.position.distanceTo(u.pos);
       const enemy = u.team !== myTeam;
       if (!enemy && dist > 3500) continue;
+      // In der Stadt keine Markierung durch Häuser hindurch
+      if (enemy && this.world && this.world.map === 'city' && dist > 120 && !this.world.lineOfSight(cam.position, _v2.set(u.pos.x, 2, u.pos.z))) continue;
       ctx.fillStyle = ctx.strokeStyle = enemy ? 'rgba(255,110,95,0.95)' : 'rgba(120,170,255,0.9)';
       const sz = 6 * dpr;
       ctx.beginPath();
@@ -261,6 +268,12 @@ export class Hud {
     ctx.font = `${12 * dpr}px Bahnschrift, Arial Narrow, sans-serif`;
 
     if (!p || !p.alive) return;
+
+    this.drawInstruments(ctx, p, game, W, H, dpr);
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.font = `${12 * dpr}px Bahnschrift, Arial Narrow, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
 
     // Trefferrichtung: roter Bogen in Richtung des Angreifers
     const camYaw = cam.rotation.y;
@@ -337,6 +350,207 @@ export class Hud {
     }
   }
 
+  // ---------- Cockpit-Instrumente ----------
+  drawInstruments(ctx, p, game, W, H, dpr) {
+    const R = 46 * dpr, gap = 14 * dpr, y = H - R - 26 * dpr;
+    const list = [];
+    if (p.kind === 'plane') {
+      list.push((x) => this.gaugeDial(ctx, x, y, R, dpr, p.speed * 3.6, 0, 750, 100, 'km/h', 'FAHRT'));
+      list.push((x) => this.gaugeHorizon(ctx, x, y, R, dpr, p));
+      list.push((x) => this.gaugeAlt(ctx, x, y, R, dpr, p.pos.y));
+      list.push((x) => this.gaugeCompass(ctx, x, y, R, dpr, p.fwd));
+    } else if (p.kind === 'ship') {
+      list.push((x) => this.gaugeDial(ctx, x, y, R, dpr, Math.abs(p.speed) * 1.94, 0, 60, 10, 'kn', 'FAHRT'));
+      list.push((x) => this.gaugeTelegraph(ctx, x, y, R, dpr, p.throttleStep ?? 2));
+      list.push((x) => this.gaugeRudder(ctx, x, y, R, dpr, p.ctrl.rudder || 0));
+      list.push((x) => this.gaugeCompass(ctx, x, y, R, dpr, p.fwd));
+    } else {
+      list.push((x) => this.gaugeDial(ctx, x, y, R, dpr, Math.abs(p.speed) * 3.6, 0, 70, 10, 'km/h', 'TACHO'));
+      list.push((x) => this.gaugeTurret(ctx, x, y, R, dpr, p));
+      list.push((x) => this.gaugeCompass(ctx, x, y, R, dpr, p.fwd));
+    }
+    // unten links, damit das eigene Fahrzeug in der Bildmitte frei bleibt
+    let x = 22 * dpr + R;
+    for (const f of list) { f(x); x += 2 * R + gap; }
+  }
+
+  face(ctx, x, y, R, dpr) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(14,16,13,0.92)';
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 3 * dpr;
+    ctx.strokeStyle = '#4a4d43';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  label(ctx, x, y, text, size, dpr, color = '#c9cbbd') {
+    ctx.fillStyle = color;
+    ctx.font = `700 ${size * dpr}px Rajdhani, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+
+  needle(ctx, x, y, a, len, w, color) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(a);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(-w, 0); ctx.lineTo(0, -len); ctx.lineTo(w, 0); ctx.lineTo(0, len * 0.15); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  gaugeDial(ctx, x, y, R, dpr, v, min, max, step, unit, title) {
+    this.face(ctx, x, y, R, dpr);
+    const a0 = -Math.PI * 0.75, a1 = Math.PI * 0.75;
+    const ang = (val) => a0 + (clamp(val, min, max) - min) / (max - min) * (a1 - a0);
+    ctx.strokeStyle = '#e8eadf';
+    for (let t = min; t <= max + 1e-6; t += step / 2) {
+      const a = ang(t), major = Math.round(t / step) * step === t;
+      const r0 = R * (major ? 0.74 : 0.82);
+      ctx.lineWidth = (major ? 2 : 1) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.sin(a) * r0, y - Math.cos(a) * r0);
+      ctx.lineTo(x + Math.sin(a) * R * 0.9, y - Math.cos(a) * R * 0.9);
+      ctx.stroke();
+      if (major && (t / step) % 2 === 0) this.label(ctx, x + Math.sin(a) * R * 0.58, y - Math.cos(a) * R * 0.58, String(t), 10, dpr);
+    }
+    this.label(ctx, x, y + R * 0.38, unit, 9, dpr, '#9aa190');
+    this.label(ctx, x, y + R * 0.62, String(Math.round(v)), 13, dpr, '#f2b33d');
+    this.needle(ctx, x, y, ang(v), R * 0.82, 3 * dpr, '#f4f1e6');
+    ctx.fillStyle = '#2a2c26'; ctx.beginPath(); ctx.arc(x, y, 4 * dpr, 0, Math.PI * 2); ctx.fill();
+    this.label(ctx, x, y + R + 10 * dpr, title, 10, dpr, '#9aa190');
+  }
+
+  gaugeHorizon(ctx, x, y, R, dpr, p) {
+    // Längs- und Querneigung aus der Lage des Flugzeugs
+    const pitch = Math.asin(clamp(p.fwd.y, -1, 1));
+    _v.set(1, 0, 0).applyQuaternion(p.root.quaternion);
+    _v2.set(0, 1, 0).applyQuaternion(p.root.quaternion);
+    const roll = Math.atan2(_v.y, _v2.y);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.clip();
+    ctx.translate(x, y);
+    ctx.rotate(roll);
+    const off = clamp(pitch / (Math.PI / 2), -1, 1) * R * 1.4;
+    ctx.fillStyle = '#3f6f9e'; ctx.fillRect(-R * 2, -R * 3 + off, R * 4, R * 3);
+    ctx.fillStyle = '#6b4f33'; ctx.fillRect(-R * 2, off, R * 4, R * 3);
+    ctx.strokeStyle = '#f4f1e6'; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath(); ctx.moveTo(-R, off); ctx.lineTo(R, off); ctx.stroke();
+    ctx.lineWidth = 1 * dpr;
+    for (const d of [-20, -10, 10, 20]) {
+      const yy = off - (d / 90) * R * 1.4, w = Math.abs(d) === 10 ? R * 0.25 : R * 0.4;
+      ctx.beginPath(); ctx.moveTo(-w, yy); ctx.lineTo(w, yy); ctx.stroke();
+    }
+    ctx.restore();
+    // feststehendes Flugzeugsymbol
+    ctx.strokeStyle = '#f2b33d'; ctx.lineWidth = 3 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(x - R * 0.55, y); ctx.lineTo(x - R * 0.18, y); ctx.lineTo(x, y + R * 0.12); ctx.lineTo(x + R * 0.18, y); ctx.lineTo(x + R * 0.55, y);
+    ctx.stroke();
+    ctx.lineWidth = 3 * dpr; ctx.strokeStyle = '#4a4d43';
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+    this.label(ctx, x, y + R + 10 * dpr, 'HORIZONT', 10, dpr, '#9aa190');
+  }
+
+  gaugeAlt(ctx, x, y, R, dpr, alt) {
+    this.face(ctx, x, y, R, dpr);
+    ctx.strokeStyle = '#e8eadf';
+    for (let i = 0; i < 50; i++) {
+      const a = (i / 50) * Math.PI * 2, major = i % 5 === 0;
+      ctx.lineWidth = (major ? 2 : 1) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.sin(a) * R * (major ? 0.74 : 0.82), y - Math.cos(a) * R * (major ? 0.74 : 0.82));
+      ctx.lineTo(x + Math.sin(a) * R * 0.9, y - Math.cos(a) * R * 0.9);
+      ctx.stroke();
+      if (major) this.label(ctx, x + Math.sin(a) * R * 0.58, y - Math.cos(a) * R * 0.58, String(i / 5), 10, dpr);
+    }
+    this.label(ctx, x, y + R * 0.38, 'x100 m', 9, dpr, '#9aa190');
+    this.label(ctx, x, y + R * 0.62, String(Math.round(alt)), 13, dpr, '#f2b33d');
+    this.needle(ctx, x, y, (alt / 10000) * Math.PI * 2, R * 0.5, 4 * dpr, '#9aa190');
+    this.needle(ctx, x, y, (alt / 1000) * Math.PI * 2, R * 0.84, 2.5 * dpr, '#f4f1e6');
+    ctx.fillStyle = '#2a2c26'; ctx.beginPath(); ctx.arc(x, y, 4 * dpr, 0, Math.PI * 2); ctx.fill();
+    this.label(ctx, x, y + R + 10 * dpr, 'HÖHE', 10, dpr, '#9aa190');
+  }
+
+  gaugeCompass(ctx, x, y, R, dpr, fwd) {
+    this.face(ctx, x, y, R, dpr);
+    const heading = Math.atan2(fwd.x, -fwd.z);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-heading);
+    const names = ['N', 'O', 'S', 'W'];
+    for (let i = 0; i < 36; i++) {
+      const a = (i / 36) * Math.PI * 2, major = i % 9 === 0;
+      ctx.strokeStyle = '#e8eadf';
+      ctx.lineWidth = (major ? 2 : 1) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(Math.sin(a) * R * (major ? 0.72 : 0.8), -Math.cos(a) * R * (major ? 0.72 : 0.8));
+      ctx.lineTo(Math.sin(a) * R * 0.9, -Math.cos(a) * R * 0.9);
+      ctx.stroke();
+      if (major) this.label(ctx, Math.sin(a) * R * 0.55, -Math.cos(a) * R * 0.55, names[i / 9], 13, dpr, i === 0 ? '#f2b33d' : '#e8eadf');
+    }
+    ctx.restore();
+    ctx.fillStyle = '#f2b33d';
+    ctx.beginPath(); ctx.moveTo(x, y - R * 0.92); ctx.lineTo(x - 5 * dpr, y - R * 0.74); ctx.lineTo(x + 5 * dpr, y - R * 0.74); ctx.fill();
+    const deg = ((heading * 180 / Math.PI) + 360) % 360;
+    this.label(ctx, x, y + R * 0.12, String(Math.round(deg)).padStart(3, '0'), 13, dpr, '#f4f1e6');
+    this.label(ctx, x, y + R + 10 * dpr, 'KURS', 10, dpr, '#9aa190');
+  }
+
+  gaugeTelegraph(ctx, x, y, R, dpr, step) {
+    this.face(ctx, x, y, R, dpr);
+    const steps = ['ZURÜCK', 'STOP', '1/4', '1/2', '3/4', 'VOLL'];
+    for (let i = 0; i < steps.length; i++) {
+      const a = -Math.PI * 0.7 + (i / (steps.length - 1)) * Math.PI * 1.4;
+      const on = i === step + 1;
+      this.label(ctx, x + Math.sin(a) * R * 0.66, y - Math.cos(a) * R * 0.66, steps[i], on ? 10 : 8, dpr, on ? '#f2b33d' : '#8f9585');
+    }
+    const a = -Math.PI * 0.7 + ((step + 1) / (steps.length - 1)) * Math.PI * 1.4;
+    this.needle(ctx, x, y, a, R * 0.45, 4 * dpr, '#f4f1e6');
+    ctx.fillStyle = '#2a2c26'; ctx.beginPath(); ctx.arc(x, y, 5 * dpr, 0, Math.PI * 2); ctx.fill();
+    this.label(ctx, x, y + R + 10 * dpr, 'MASCHINE', 10, dpr, '#9aa190');
+  }
+
+  gaugeRudder(ctx, x, y, R, dpr, rudder) {
+    this.face(ctx, x, y, R, dpr);
+    ctx.strokeStyle = '#e8eadf';
+    for (let i = -3; i <= 3; i++) {
+      const a = Math.PI + (i / 3) * 0.7;
+      ctx.lineWidth = (i === 0 ? 2.5 : 1.5) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.sin(a) * R * 0.7, y - Math.cos(a) * R * 0.7);
+      ctx.lineTo(x + Math.sin(a) * R * 0.88, y - Math.cos(a) * R * 0.88);
+      ctx.stroke();
+    }
+    this.label(ctx, x - R * 0.55, y - R * 0.1, 'BB', 10, dpr, '#e5574a');
+    this.label(ctx, x + R * 0.55, y - R * 0.1, 'StB', 10, dpr, '#8fd16a');
+    this.needle(ctx, x, y, Math.PI - rudder * 0.7, R * 0.82, 3 * dpr, '#f4f1e6');
+    ctx.fillStyle = '#2a2c26'; ctx.beginPath(); ctx.arc(x, y, 4 * dpr, 0, Math.PI * 2); ctx.fill();
+    this.label(ctx, x, y + R + 10 * dpr, 'RUDER', 10, dpr, '#9aa190');
+  }
+
+  gaugeTurret(ctx, x, y, R, dpr, p) {
+    this.face(ctx, x, y, R, dpr);
+    const t = p.turret;
+    // Wanne von oben, Turm dreht relativ dazu
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = '#9aa190'; ctx.lineWidth = 2 * dpr;
+    ctx.strokeRect(-R * 0.22, -R * 0.36, R * 0.44, R * 0.72);
+    ctx.rotate(-t.yaw);
+    ctx.fillStyle = '#e8eadf';
+    ctx.fillRect(-R * 0.15, -R * 0.15, R * 0.3, R * 0.3);
+    ctx.fillRect(-1.5 * dpr, -R * 0.7, 3 * dpr, R * 0.6);
+    ctx.restore();
+    // Nachlade-Ring
+    const f = clamp(1 - Math.max(0, t.reload) / p.cal.reload, 0, 1);
+    ctx.strokeStyle = f >= 1 ? '#8fd16a' : '#f2b33d';
+    ctx.lineWidth = 4 * dpr;
+    ctx.beginPath(); ctx.arc(x, y, R * 0.9, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+    this.label(ctx, x, y + R + 10 * dpr, f >= 1 ? 'GELADEN' : 'LÄDT', 10, dpr, f >= 1 ? '#8fd16a' : '#9aa190');
+  }
+
   // Kompassband oben: Himmelsrichtungen, Grad, Zonen
   drawCompass(ctx, cam, game, W, dpr) {
     const heading = ((-cam.rotation.y * 180 / Math.PI) % 360 + 360) % 360;
@@ -393,11 +607,12 @@ export class Hud {
     const g = this.mini, S = 200;
     g.clearRect(0, 0, S, S);
     if (this.miniBg) g.drawImage(this.miniBg, 0, 0);
-    const tx = (x) => (x / MAP_HALF + 1) / 2 * S;
+    const HALF = this.world ? this.world.half : MAP_HALF;
+    const tx = (x) => (x / HALF + 1) / 2 * S;
     g.lineWidth = 1.5;
     for (const z of game.zones) {
       g.strokeStyle = z.owner === 0 ? '#4c8df0' : z.owner === 1 ? '#e2564a' : '#dddddd';
-      g.beginPath(); g.arc(tx(z.x), tx(z.z), z.r / MAP_HALF * S / 2, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(tx(z.x), tx(z.z), z.r / HALF * S / 2, 0, Math.PI * 2); g.stroke();
       g.fillStyle = g.strokeStyle;
       g.font = 'bold 11px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(z.name, tx(z.x), tx(z.z));
@@ -409,7 +624,7 @@ export class Hud {
       g.save(); g.translate(x, y); g.rotate(a);
       g.fillStyle = u.isPlayer ? '#f2b33d' : u.team === (game.myTeam ?? 0) ? '#7fb0ff' : '#ff7d70';
       const s = u.isPlayer ? 5 : u.kind === 'ship' ? 4 : 3;
-      if (u.kind === 'ship') g.fillRect(-s * 0.5, -s * 1.3, s, s * 2.6);
+      if (u.kind !== 'plane') g.fillRect(-s * 0.5, -s * 1.3, s, s * 2.6);
       else { g.beginPath(); g.moveTo(0, -s * 1.4); g.lineTo(s, s); g.lineTo(-s, s); g.closePath(); g.fill(); }
       g.restore();
     }
@@ -421,18 +636,20 @@ export class Hud {
   }
 }
 
-export function vehicleCardHtml(def, locked, lockText) {
-  return `<span class="c-name">${def.name}</span><span class="c-class">${def.klasse}</span>${locked ? `<span class="c-lock">Gesperrt · ${lockText}</span>` : ''}`;
+export function vehicleCardHtml(def, locked, img) {
+  return `<img src="${img}" alt=""><span class="c-text"><span class="c-name">${def.name}</span><span class="c-class">${def.klasse}</span>${locked ? `<span class="c-lock">Gesperrt · ${def.unlock}er-Serie</span>` : ''}</span>`;
 }
 
-export function vehicleDetailsHtml(def, CALIBERS) {
+export function vehicleDetailsHtml(def, CALIBERS, locked) {
   const s = def.stats;
-  const bar = (label, v) => `<div class="stat"><span>${label}</span><span class="sbar"><i style="width:${v * 100}%"></i></span></div>`;
+  const bar = (label, v) => `<div class="stat"><span>${label}</span><span class="sbar"><i style="width:${v * 100}%"></i></span><em>${Math.round(v * 10)}</em></div>`;
   let weapons = '';
   if (def.kind === 'plane') {
     weapons += def.guns.map((g) => `<div>${g.name} ×${g.mounts.length}</div>`).join('');
     if (def.secondary) weapons += `<div>${def.secondary.name} ×${def.secondary.count}</div>`;
     if (def.tailGun) weapons += '<div>Heck-MG (automatisch)</div>';
+  } else if (def.kind === 'tank') {
+    weapons += `<div>${def.gun.name} · ${def.gun.reload.toFixed(1)} s Nachladen</div>`;
   } else {
     const cal = { schnellboot: '40', zerstoerer: '120', kreuzer: '203' }[def.id];
     const barrels = { schnellboot: 2, zerstoerer: 8, kreuzer: 12 }[def.id];
@@ -440,7 +657,7 @@ export function vehicleDetailsHtml(def, CALIBERS) {
     if (def.torpedo) weapons += `<div>Torpedos ×${def.torpedo.count}</div>`;
     weapons += `<div>Flak ×${def.aa.length} (automatisch)</div>`;
   }
-  return `<h3>${def.name}</h3><div class="muted">${def.klasse}</div><p>${def.desc}</p>
+  return `<h3>${def.name}</h3><div class="muted">${def.klasse}</div>${locked ? `<div class="lockinfo">Freischalten: ${def.unlock} Abschüsse in Folge</div>` : ''}<p>${def.desc}</p>
     ${bar('Tempo', s.tempo)}${bar('Panzerung', s.panzer)}${bar('Feuerkraft', s.feuer)}${bar('Wendigkeit', s.wendig)}
     <div class="weapons">${weapons}</div>`;
 }

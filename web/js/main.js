@@ -1,21 +1,21 @@
 import * as THREE from 'three';
-import { World, waveHeight } from './world.js?v=9';
-import { Effects } from './effects.js?v=9';
-import { Sound } from './audio.js?v=9';
-import { Game, TEAM_NAMES, STREAKS, PER_TEAM } from './game.js?v=9';
-import { DEFS, CALIBERS, PLANES, SHIPS } from './vehicles.js?v=9';
-import { buildModel } from './models.js?v=9';
-import { Hud, vehicleCardHtml, vehicleDetailsHtml, esc } from './hud.js?v=9';
-import { clamp, elevationFor, fmtTime } from './util.js?v=9';
-import { createPipeline } from './render.js?v=9';
-import { NetHost, NetClient, ClientGame, findRandom, makeCode, normalizeCode } from './net.js?v=9';
-import { splitLogo, screenIn, cardsIn, detailsIn, countUp, resultIn, hudIn, bindUiSounds, camoTransition } from './ui.js?v=9';
+import { World, waveHeight } from './world.js?v=11';
+import { Effects } from './effects.js?v=11';
+import { Sound } from './audio.js?v=11';
+import { Game, TEAM_NAMES, PER_TEAM, MAPS } from './game.js?v=11';
+import { DEFS, CALIBERS, PLANES, SHIPS, TANKS, START_UNLOCKS } from './vehicles.js?v=11';
+import { preview } from './preview.js?v=11';
+import { buildModel } from './models.js?v=11';
+import { Hud, vehicleCardHtml, vehicleDetailsHtml, esc } from './hud.js?v=11';
+import { clamp, elevationFor, fmtTime, angleDiff } from './util.js?v=11';
+import { createPipeline } from './render.js?v=11';
+import { NetHost, NetClient, ClientGame, findRandom, makeCode, normalizeCode } from './net.js?v=11';
+import { splitLogo, screenIn, cardsIn, detailsIn, countUp, resultIn, hudIn, bindUiSounds, camoTransition } from './ui.js?v=11';
 
 const $ = (id) => document.getElementById(id);
 
 // ---------- Einstellungen, Freischaltungen, Dienstakte ----------
 const DEFAULT_SETTINGS = { name: 'Spieler', difficulty: 'normal', quality: 'mittel', sens: 1, invert: false, volume: 0.6 };
-const START_UNLOCKS = ['falke', 'schnellboot'];
 
 function load(key, fallback) {
   try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch { return fallback; }
@@ -29,8 +29,6 @@ const unlocks = new Set([...START_UNLOCKS, ...load('sturmflut.unlocks', [])]);
 const saveUnlocks = () => save('sturmflut.unlocks', [...unlocks]);
 const career = { matches: 0, wins: 0, kills: 0, best: 0, ...load('sturmflut.career', {}) };
 
-const UNLOCK_TEXT = {};
-for (const s of STREAKS) if (s.unlock) for (const id of s.unlock) UNLOCK_TEXT[id] = `${s.n}er-Serie`;
 
 const RANKS = [[0, 'Rekrut'], [10, 'Gefreiter'], [30, 'Unteroffizier'], [75, 'Feldwebel'], [150, 'Leutnant'], [300, 'Hauptmann'], [600, 'Major']];
 const rankFor = (k) => RANKS.filter(([n]) => k >= n).pop()[1];
@@ -74,7 +72,8 @@ let ignoreMouseUntil = 0;
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (e.code === 'Tab') e.preventDefault();
-  if (e.code === 'Space' && state === 'playing') e.preventDefault();
+  if ((e.code === 'Space' || e.code.startsWith('Arrow')) && state === 'playing') e.preventDefault();
+  if (!$('hangar').hidden && hangarKey(e)) { e.preventDefault(); return; }
   if (!keys.has(e.code)) onKeyPress(e.code);
   keys.add(e.code);
 });
@@ -178,7 +177,7 @@ function toMenu() {
 function renderProfile() {
   $('profName').textContent = settings.name;
   $('profRank').textContent = rankFor(career.kills);
-  $('profUnlocks').textContent = `${unlocks.size}/6 Fahrzeuge`;
+  $('profUnlocks').textContent = `${[...unlocks].filter((id) => DEFS[id]).length}/${Object.keys(DEFS).length} Fahrzeuge`;
   $('carMatches').textContent = career.matches;
   $('carWins').textContent = career.wins;
   $('carKills').textContent = career.kills;
@@ -186,25 +185,46 @@ function renderProfile() {
 }
 
 // ---------- Hangar ----------
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-  tab = t.dataset.tab;
-  const list = tab === 'plane' ? PLANES : SHIPS;
+let currentMap = 'sea';
+const KIND_LABEL = { plane: 'Flugzeuge', ship: 'Schiffe', tank: 'Panzer' };
+const LISTS = { plane: PLANES, ship: SHIPS, tank: TANKS };
+
+function renderTabs() {
+  const kinds = MAPS[currentMap].kinds;
+  if (!kinds.includes(tab)) tab = kinds[0];
+  $('tabs').innerHTML = kinds.map((k) => `<button class="tab${k === tab ? ' active' : ''}" data-tab="${k}">${KIND_LABEL[k]}</button>`).join('');
+  $('tabs').querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
+  $('mapSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.map === currentMap));
+}
+
+function selectTab(kind) {
+  tab = kind;
+  const list = LISTS[tab];
   if (!list.includes(selected)) selected = list.find((id) => unlocks.has(id)) || list[0];
   renderHangar();
+}
+
+$('mapSwitch').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+  if (hangarKind !== 'training') return;
+  currentMap = b.dataset.map;
+  tab = MAPS[currentMap].kinds[0];
+  selectTab(tab);
 }));
 
 // kind: training (vor dem Solo-Gefecht) | deploy (Einstieg ins laufende Gefecht) | respawn
 let hangarKind = 'training';
 function openHangar(kind) {
   hangarKind = kind;
+  if (game) currentMap = game.map;
   showScreen('hangar');
   const titles = { training: ['Training', 'Fahrzeug wählen'], deploy: [modeLabel(), 'Einsatz wählen'], respawn: [modeLabel(), 'Wieder einsteigen'] };
-  $('hangarKicker').textContent = titles[kind][0];
+  $('hangarKicker').textContent = `${titles[kind][0]} · ${MAPS[currentMap].name}`;
   $('hangarTitle').textContent = titles[kind][1];
   $('hangarBack').textContent = kind === 'training' ? 'Zurück' : 'Gefecht verlassen';
+  $('mapSwitch').hidden = kind !== 'training';
+  if (!MAPS[currentMap].kinds.includes(DEFS[selected].kind)) selected = LISTS[MAPS[currentMap].kinds[0]][0];
   tab = DEFS[selected].kind;
-  if (!unlocks.has(selected)) selected = tab === 'plane' ? 'falke' : 'schnellboot';
-  if (kind === 'training') { state = 'menu'; setShowcase(selected); }
+  if (!unlocks.has(selected)) selected = LISTS[tab].find((id) => unlocks.has(id));
   renderHangar();
 }
 
@@ -214,8 +234,8 @@ function modeLabel() {
 }
 
 function renderHangar() {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
-  const list = tab === 'plane' ? PLANES : SHIPS;
+  renderTabs();
+  const list = LISTS[tab];
   const cards = $('cards');
   cards.innerHTML = '';
   for (const id of list) {
@@ -223,14 +243,48 @@ function renderHangar() {
     const b = document.createElement('button');
     const isLocked = !unlocks.has(id);
     b.className = 'card' + (id === selected ? ' sel' : '') + (isLocked ? ' locked' : '');
-    b.innerHTML = vehicleCardHtml(def, isLocked, UNLOCK_TEXT[id]);
-    b.addEventListener('click', () => { selected = id; if (state === 'menu') setShowcase(id); renderHangar(); });
+    b.setAttribute('role', 'option');
+    b.innerHTML = vehicleCardHtml(def, isLocked, preview(id));
+    b.addEventListener('click', () => selectVehicle(id));
     cards.appendChild(b);
   }
-  $('details').innerHTML = vehicleDetailsHtml(DEFS[selected], CALIBERS);
-  detailsIn($('details'));
+  showDetails();
   if (cards.dataset.tab !== tab) { cards.dataset.tab = tab; cardsIn(cards); }
   updateDeployButton();
+}
+
+function selectVehicle(id) {
+  selected = id;
+  $('cards').querySelectorAll('.card').forEach((c, i) => c.classList.toggle('sel', LISTS[tab][i] === id));
+  const sel = $('cards').querySelector('.card.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+  showDetails();
+  updateDeployButton();
+  if (state === 'menu') setShowcase(id);
+}
+
+function showDetails() {
+  $('previewImg').src = preview(selected);
+  $('details').innerHTML = vehicleDetailsHtml(DEFS[selected], CALIBERS, !unlocks.has(selected));
+  detailsIn($('details'));
+}
+
+// Tastatur im Hangar: Pfeile wählen, Enter steigt ein, Esc zurück
+function hangarKey(e) {
+  const list = LISTS[tab];
+  const i = list.indexOf(selected);
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') { selectVehicle(list[(i + 1) % list.length]); return true; }
+  if (e.code === 'ArrowUp' || e.code === 'KeyW') { selectVehicle(list[(i - 1 + list.length) % list.length]); return true; }
+  if (e.code === 'ArrowRight' || e.code === 'ArrowLeft' || e.code === 'KeyA' || e.code === 'KeyD') {
+    const kinds = MAPS[currentMap].kinds;
+    if (kinds.length < 2) return true;
+    const k = kinds.indexOf(tab) + (e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : -1);
+    selectTab(kinds[(k + kinds.length) % kinds.length]);
+    return true;
+  }
+  if (e.code === 'Enter') { $('deploy').click(); return true; }
+  if (e.code === 'Escape') { $('hangarBack').click(); return true; }
+  return false;
 }
 
 function updateDeployButton() {
@@ -238,7 +292,7 @@ function updateDeployButton() {
   const isLocked = !unlocks.has(selected);
   const wait = state === 'dead' ? Math.max(0, respawnAt - performance.now() / 1000) : 0;
   btn.disabled = isLocked || wait > 0 || state === 'waiting';
-  btn.textContent = isLocked ? `Gesperrt · ${UNLOCK_TEXT[selected]}` : state === 'waiting' ? 'Wird verlegt …' : wait > 0 ? `Bereit in ${Math.ceil(wait)} s` : 'Ins Gefecht';
+  btn.textContent = isLocked ? `Gesperrt · ${DEFS[selected].unlock}er-Serie` : state === 'waiting' ? 'Wird verlegt …' : wait > 0 ? `Bereit in ${Math.ceil(wait)} s` : 'Ins Gefecht';
   $('respawnTimer').textContent = game ? `Blau ${Math.ceil(game.tickets[0])} · Rot ${Math.ceil(game.tickets[1])} · ${fmtTime(game.duration - game.time)}` : '';
 }
 
@@ -303,6 +357,8 @@ function setShowcase(id) {
   const m = buildModel(id, 0);
   showcase = { id, mesh: m.mesh, props: m.props, def: DEFS[id] };
   scene.add(m.mesh);
+  // Panzer stehen auf dem Platz in der Stadt, alles andere über dem Meer
+  if (!game) world.setMap(DEFS[id].kind === 'tank' ? 'city' : 'sea');
 }
 function hideShowcase() {
   if (showcase) { scene.remove(showcase.mesh); showcase = null; }
@@ -314,11 +370,14 @@ function updateMenu(dt) {
   const t = world.time;
   if (!s) return;
   const isPlane = s.def.kind === 'plane';
-  const size = isPlane ? 14 : s.def.len;
+  const size = isPlane ? (s.def.hitR > 10 ? 26 : 14) : s.def.len * (s.def.kind === 'tank' ? 1.6 : 1);
   if (isPlane) {
     s.mesh.position.set(0, 30 + Math.sin(t * 0.8) * 1.2, 0);
     s.mesh.rotation.set(Math.sin(t * 0.6) * 0.04, 0, Math.sin(t * 0.5) * 0.08);
     for (const p of s.props) p.rotation.z += dt * 40;
+  } else if (s.def.kind === 'tank') {
+    s.mesh.position.set(0, 0, 0);
+    s.mesh.rotation.set(0, 0, 0);
   } else {
     s.mesh.position.set(0, waveHeight(0, 0, t) * 0.5, 0);
     s.mesh.rotation.set(Math.sin(t * 0.7) * 0.01, 0, Math.sin(t * 0.5) * 0.02);
@@ -327,7 +386,7 @@ function updateMenu(dt) {
   const shift = innerWidth > 820 ? 0.28 : 0;
   camera.fov = 50; camera.updateProjectionMatrix();
   camera.position.set(Math.sin(menuAngle) * d, s.mesh.position.y + size * 0.28 + 2, Math.cos(menuAngle) * d);
-  camera.lookAt(s.mesh.position.x, s.mesh.position.y + (isPlane ? 0 : s.def.top * 0.3), s.mesh.position.z);
+  camera.lookAt(s.mesh.position.x, s.mesh.position.y + (isPlane ? 0 : s.def.top * (s.def.kind === 'tank' ? 0.5 : 0.3)), s.mesh.position.z);
   camera.rotateY(shift * 0.6);
   world.update(dt, s.mesh.position, camera);
 }
@@ -362,8 +421,8 @@ function makeHooks() {
   };
 }
 
-function newLocalGame(difficulty) {
-  return new Game({ scene, world, effects, audio, settings: { ...settings, difficulty }, unlocks, hooks: makeHooks() });
+function newLocalGame(difficulty, map) {
+  return new Game({ scene, world, effects, audio, settings: { ...settings, difficulty }, unlocks, hooks: makeHooks(), map });
 }
 
 function prepareMatch() {
@@ -377,7 +436,7 @@ function startSolo() {
   camoTransition(() => {
     mode = 'solo';
     prepareMatch();
-    game = newLocalGame(settings.difficulty);
+    game = newLocalGame(settings.difficulty, currentMap);
     game.start(selected);
     hud.setup(game, world);
     beginControl();
@@ -514,6 +573,7 @@ function renderLobby(st, isHost) {
   $('lobbyOpts').hidden = !isHost;
   $('optMode').value = st.settings.mode;
   $('optDiff').value = st.settings.difficulty;
+  $('optMap').value = st.settings.map || 'sea';
   $('lobbyStart').hidden = !isHost;
   $('lobbyTeam').hidden = st.settings.mode !== 'versus';
   $('lobbyNote').textContent = isHost
@@ -523,6 +583,7 @@ function renderLobby(st, isHost) {
 
 $('optMode').addEventListener('change', (e) => { if (mode === 'host') net.setSettings({ mode: e.target.value }); });
 $('optDiff').addEventListener('change', (e) => { if (mode === 'host') net.setSettings({ difficulty: e.target.value }); });
+$('optMap').addEventListener('change', (e) => { if (mode === 'host') net.setSettings({ map: e.target.value }); });
 $('lobbyTeam').addEventListener('click', () => {
   if (mode === 'host') { net.hostTeam = net.hostTeam ? 0 : 1; net.broadcastLobby(); }
   else if (net) {
@@ -544,7 +605,7 @@ function startHostMatch() {
   camoTransition(() => {
     inLobby = false;
     prepareMatch();
-    game = newLocalGame(net.settings.difficulty);
+    game = newLocalGame(net.settings.difficulty, net.settings.map);
     net.attach(game);
     game.start(null, net.hostTeam);
     net.startGame();
@@ -556,7 +617,7 @@ function startHostMatch() {
 function startClientMatch(m) {
   inLobby = false;
   prepareMatch();
-  game = new ClientGame({ scene, world, effects, audio, settings, unlocks, hooks: makeHooks(), net });
+  game = new ClientGame({ scene, world, effects, audio, settings, unlocks, hooks: makeHooks(), net, map: m.map || 'sea' });
   game.myTeam = m.team;
   net.game = game;
   hud.setup(game, world);
@@ -607,7 +668,22 @@ function beginControl() {
   mouse.dx = mouse.dy = 0;
   $('netinfo').hidden = mode === 'solo';
   $('netinfo').textContent = mode === 'solo' ? '' : `${modeLabel()} · ${mode === 'host' ? 'Host' : 'verbunden'}`;
+  showKeyHint(p.kind);
   requestLock();
+}
+
+const KEY_HINTS = {
+  plane: '<b>Pfeile</b> steuern · <b>W/S</b> Schub · <b>A/D</b> Seitenruder · <b>Leertaste</b> Feuer · <b>E</b> Bomben/Raketen · oder Maus',
+  ship: '<b>W/S</b> Fahrstufe · <b>A/D</b> Ruder · <b>Pfeile</b> zielen · <b>Leertaste</b> Feuer · <b>E</b> Torpedos · oder Maus',
+  tank: '<b>W/A/S/D</b> fahren · <b>Pfeile</b> Turm und Rohr · <b>Leertaste</b> Feuer · oder Maus',
+};
+let keyHintTimer = 0;
+function showKeyHint(kind) {
+  const el = $('keyhint');
+  el.innerHTML = KEY_HINTS[kind];
+  el.hidden = false;
+  clearTimeout(keyHintTimer);
+  keyHintTimer = setTimeout(() => { el.hidden = true; }, 9000);
 }
 
 function pause() {
@@ -681,7 +757,7 @@ function onKeyPress(code) {
     if (code === 'KeyW') p.throttleStep = Math.min(4, (p.throttleStep ?? 2) + 1);
     if (code === 'KeyS') p.throttleStep = Math.max(-1, (p.throttleStep ?? 2) - 1);
     p.ctrl.throttle = p.throttleStep === -1 ? -0.25 : p.throttleStep / 4;
-    if (code === 'Space' || code === 'Mouse2') { p.ctrl.torp = true; torpSeq++; }
+    if (code === 'KeyE' || code === 'Mouse2') { p.ctrl.torp = true; torpSeq++; }
   }
 }
 
@@ -692,49 +768,84 @@ function dirFrom(yaw, pitch, out) {
   return out.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
 }
 
+let kbFlightUntil = 0;
 function controlPlayer(dt) {
   const p = game.player;
   if (!p) return;
+  const K = (c) => keys.has(c);
   const sens = 0.0022 * settings.sens * view.zoom;
   const inv = settings.invert ? -1 : 1;
-  const free = keys.has('KeyC');
+  const free = K('KeyC');
   if (free) {
     view.freeYaw -= mouse.dx * sens; view.freePitch = clamp(view.freePitch - mouse.dy * sens * inv, -1.2, 1.2);
   } else {
     view.yaw -= mouse.dx * sens;
-    view.pitch = clamp(view.pitch - mouse.dy * sens * inv, p.kind === 'plane' ? -1.45 : -0.6, p.kind === 'plane' ? 1.45 : 0.35);
+    const lim = p.kind === 'plane' ? [-1.45, 1.45] : p.kind === 'tank' ? [-0.4, 0.3] : [-0.6, 0.35];
+    view.pitch = clamp(view.pitch - mouse.dy * sens * inv, lim[0], lim[1]);
     view.freeYaw *= 0.85; view.freePitch *= 0.85;
   }
   mouse.dx = mouse.dy = 0;
-  const zoomKey = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const zoomKey = K('ShiftLeft') || K('ShiftRight');
   view.zoom += ((zoomKey ? 0.35 : 1) - view.zoom) * Math.min(1, dt * 10);
   if (mouse.wheel) { view.dist = clamp(view.dist + mouse.wheel * 0.12, 0.5, 2.2); mouse.wheel = 0; }
 
   if (!p.alive) return;
   const c = p.ctrl;
+  const arrowX = (K('ArrowRight') ? 1 : 0) - (K('ArrowLeft') ? 1 : 0);
+  const arrowY = (K('ArrowUp') ? 1 : 0) - (K('ArrowDown') ? 1 : 0);
+
   if (p.kind === 'plane') {
-    dirFrom(view.yaw, view.pitch, view.aimDir);
-    p.steer(view.aimDir);
-    if (keys.has('KeyA')) c.roll = -1;
-    if (keys.has('KeyD')) c.roll = 1;
-    if (keys.has('KeyW')) c.throttle = Math.min(1, c.throttle + dt * 0.7);
-    if (keys.has('KeyS')) c.throttle = Math.max(0, c.throttle - dt * 0.7);
-    c.fire = mouse.left;
-    c.fire2 = mouse.right || keys.has('Space');
+    const now = performance.now();
+    if (arrowX || arrowY) kbFlightUntil = now + 1500;
+    const rudder = (K('KeyD') ? 1 : 0) - (K('KeyA') ? 1 : 0);
+    if (now < kbFlightUntil) {
+      // Direkte Tastatursteuerung wie mit Knüppel: Pfeil runter = ziehen
+      c.pitch = -arrowY;
+      c.roll = arrowX;
+      c.yaw = rudder * 0.8;
+      // Kamera folgt der Flugzeugnase
+      const fy = Math.atan2(-p.fwd.x, -p.fwd.z), fp = Math.asin(clamp(p.fwd.y, -1, 1));
+      view.yaw += angleDiff(view.yaw, fy) * Math.min(1, dt * 5);
+      view.pitch += (fp - view.pitch) * Math.min(1, dt * 5);
+      view.aimDir.copy(p.fwd);
+    } else {
+      dirFrom(view.yaw, view.pitch, view.aimDir);
+      p.steer(view.aimDir);
+      if (rudder) c.yaw = rudder;
+    }
+    if (K('KeyW')) c.throttle = Math.min(1, c.throttle + dt * 0.7);
+    if (K('KeyS')) c.throttle = Math.max(0, c.throttle - dt * 0.7);
+    c.fire = mouse.left || K('Space');
+    c.fire2 = mouse.right || K('KeyE');
+  } else if (p.kind === 'ship') {
+    view.yaw -= arrowX * dt * 0.9 * view.zoom;
+    view.pitch = clamp(view.pitch + arrowY * dt * 0.25 * view.zoom, -0.6, 0.35);
+    c.rudder = (K('KeyD') ? 1 : 0) - (K('KeyA') ? 1 : 0);
+    c.fire = mouse.left || K('Space');
+    c.aimPoint = view.aim;
   } else {
-    c.rudder = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
-    c.fire = mouse.left;
+    view.yaw -= arrowX * dt * 1.1 * view.zoom;
+    view.pitch = clamp(view.pitch + arrowY * dt * 0.35 * view.zoom, -0.4, 0.3);
+    c.throttle = (K('KeyW') ? 1 : 0) - (K('KeyS') ? 0.5 : 0);
+    c.steer = (K('KeyD') ? 1 : 0) - (K('KeyA') ? 1 : 0);
+    c.fire = mouse.left || K('Space');
     c.aimPoint = view.aim;
   }
 
   if (mode === 'client') {
     const r1 = (v) => Math.round(v * 100) / 100;
+    const now = performance.now();
+    const ap = [Math.round(view.aim.x), Math.round(view.aim.y), Math.round(view.aim.z)];
     if (p.kind === 'plane') {
-      const roll = keys.has('KeyA') ? -1 : keys.has('KeyD') ? 1 : 0;
-      net.sendInput({ a: [r1(view.aimDir.x), r1(view.aimDir.y), r1(view.aimDir.z)], r: roll, th: r1(c.throttle), f1: c.fire ? 1 : 0, f2: c.fire2 ? 1 : 0 }, performance.now());
+      // Bei Tastaturflug schickt der Client die Nase als Ziel, der Host lenkt dann geradeaus weiter
+      const roll = arrowX || (K('KeyA') ? -1 : K('KeyD') ? 1 : 0);
+      const a = now < kbFlightUntil ? _f.copy(p.fwd).addScaledVector(_u.set(0, 1, 0).applyQuaternion(p.root.quaternion), -arrowY * 0.35).normalize() : view.aimDir;
+      net.sendInput({ a: [r1(a.x), r1(a.y), r1(a.z)], r: roll, th: r1(c.throttle), f1: c.fire ? 1 : 0, f2: c.fire2 ? 1 : 0 }, now);
+    } else if (p.kind === 'tank') {
+      net.sendInput({ th: c.throttle, ru: c.steer, ap, f1: c.fire ? 1 : 0 }, now);
     } else {
       const th = p.throttleStep === -1 ? -0.25 : (p.throttleStep ?? 2) / 4;
-      net.sendInput({ th, st: p.throttleStep, ru: c.rudder, ap: [Math.round(view.aim.x), Math.round(view.aim.y), Math.round(view.aim.z)], f1: c.fire ? 1 : 0, tq: torpSeq }, performance.now());
+      net.sendInput({ th, st: p.throttleStep, ru: c.rudder, ap, f1: c.fire ? 1 : 0, tq: torpSeq }, now);
     }
   }
 }
@@ -780,32 +891,44 @@ function updateCamera(dt) {
       }
     }
   } else {
-    const fov = 60 * view.zoom;
+    const tank = p.kind === 'tank';
+    const fov = (tank ? 62 : 60) * view.zoom;
     if (Math.abs(camera.fov - fov) > 0.1) { camera.fov = fov; camera.updateProjectionMatrix(); }
     const yaw = view.yaw + view.freeYaw, pitch = view.pitch + view.freePitch;
     const dir = dirFrom(yaw, pitch, _f);
-    const pivot = _u.copy(p.pos); pivot.y += p.def.top * 0.9;
+    const pivot = _u.copy(p.pos); pivot.y += tank ? p.def.top + 1.4 : p.def.top * 0.9;
     const d = p.def.camDist * distMul * (view.zoom < 0.9 ? 0.6 : 1);
     _t.copy(pivot).addScaledVector(dir, -d);
-    _t.y += d * 0.18;
-    _t.y = Math.max(_t.y, 4);
+    _t.y += d * (tank ? 0.22 : 0.18);
+    _t.y = Math.max(_t.y, tank ? 2 : 4);
     view.camPos.lerp(_t, Math.min(1, dt * 12));
     camera.position.copy(view.camPos).add(shakeOffset(dt));
     camera.rotation.set(pitch, yaw, 0);
     const cf = dirFrom(yaw, pitch, _t);
     const range = p.cal.range;
-    let tHit = cf.y < -0.0005 ? -camera.position.y / cf.y : Infinity;
-    const horiz = Math.hypot(cf.x, cf.z);
-    const maxT = (range * 1.1 + d) / Math.max(horiz, 0.01);
-    if (tHit > maxT) tHit = maxT;
-    view.aim.copy(camera.position).addScaledVector(cf, tHit);
+    if (tank) {
+      // Zielpunkt: erster Treffer mit Gebäude oder Boden entlang der Blickrichtung
+      let t = d;
+      const maxT = range * 1.3 + d;
+      for (; t < maxT; t += 4) {
+        const x = camera.position.x + cf.x * t, y = camera.position.y + cf.y * t, z = camera.position.z + cf.z * t;
+        if (y <= 0 || world.heightAt(x, z) > y) break;
+      }
+      view.aim.copy(camera.position).addScaledVector(cf, Math.min(t, maxT));
+    } else {
+      let tHit = cf.y < -0.0005 ? -camera.position.y / cf.y : Infinity;
+      const horiz = Math.hypot(cf.x, cf.z);
+      const maxT = (range * 1.1 + d) / Math.max(horiz, 0.01);
+      if (tHit > maxT) tHit = maxT;
+      view.aim.copy(camera.position).addScaledVector(cf, tHit);
+    }
     view.aim.y = Math.max(0, view.aim.y);
     game.aimDist = Math.hypot(view.aim.x - p.pos.x, view.aim.z - p.pos.z);
     // Vorhalt-Raute für das Schiff nahe dem Fadenkreuz
     if (p.alive) {
       let best = null, bestA = 0.12;
       for (const u of game.units) {
-        if (!u.alive || u.team === p.team || u.kind !== 'ship') continue;
+        if (!u.alive || u.team === p.team || u.kind !== p.kind) continue;
         _u.subVectors(u.pos, camera.position).normalize();
         const a = Math.acos(clamp(_u.dot(cf), -1, 1));
         if (a < bestA && u.pos.distanceTo(p.pos) < range * 1.1) { bestA = a; best = u; }
@@ -818,7 +941,7 @@ function updateCamera(dt) {
           const tof = dx / (p.cal.speed * Math.cos(e));
           lv.copy(best.vel).multiplyScalar(tof).add(best.pos);
         }
-        lv.y = 2;
+        lv.y = tank ? 1.5 : 2;
         view.lead = lv;
       }
     }
@@ -831,7 +954,8 @@ const specFocus = new THREE.Vector3(0, 0, 0);
 function spectatorCamera(dt) {
   specAngle += dt * 0.04;
   if (Math.abs(camera.fov - 55) > 0.1) { camera.fov = 55; camera.updateProjectionMatrix(); }
-  camera.position.set(Math.sin(specAngle) * 2600, 750, Math.cos(specAngle) * 2600);
+  const city = world.map === 'city';
+  camera.position.set(Math.sin(specAngle) * (city ? 1100 : 2600), city ? 420 : 750, Math.cos(specAngle) * (city ? 1100 : 2600));
   camera.lookAt(specFocus);
 }
 

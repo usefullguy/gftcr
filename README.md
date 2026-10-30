@@ -1,9 +1,11 @@
 # Sturmflut
 
-Luft- und Seegefechte im Browser. Blau gegen Rot, 7 gegen 7. Allein gegen KI oder mit anderen online.
+Luft-, See- und Stadtgefechte im Browser. Blau gegen Rot, 7 gegen 7. Allein gegen KI oder mit anderen online.
 
-- **Flugzeuge:** Falke (Jäger), Habicht (zweimotorig, Raketen), Bussard (Bomber)
-- **Schiffe:** Schnellboot (Torpedos), Zerstörer, Kreuzer
+- **Karten:** Inselmeer (Flugzeuge und Schiffe) und Stadt (Panzer)
+- **Flugzeuge (9):** Sperber, Falke, Specht, Habicht, Uhu, Möwe (Lufttorpedo), Bussard, Kondor (viermotorig), Milan (Strahljäger)
+- **Schiffe (3):** Schnellboot, Zerstörer, Kreuzer
+- **Panzer (3):** Dachs, Keiler, Wisent
 - **Modus:** Drei Zonen (A, B, C) werden von Schiffen eingenommen. Wer mehr Zonen hält, zieht dem Gegner Punkte ab. Abschüsse kosten ebenfalls Punkte. Wer zuerst bei 0 ist oder nach 15 Minuten weniger Punkte hat, verliert.
 - **Serien:** Abschüsse ohne selbst abgeschossen zu werden schalten Fahrzeuge frei und geben Belohnungen (Reparatur, Begleitschutz, Sperrfeuer). Freischaltungen werden im Browser gespeichert.
 
@@ -30,15 +32,18 @@ Dann `http://localhost:8000` öffnen.
 
 ## Steuerung
 
-| | Flugzeug | Schiff |
-|---|---|---|
-| Maus | Zielrichtung, das Flugzeug fliegt hinterher | Zielen, die Türme drehen nach |
-| Linke Maustaste | Bordwaffen | Feuer |
-| Rechte Maustaste / Leertaste | Bomben / Raketen | Torpedos |
-| W / S | Schub | Fahrstufe |
-| A / D | Rollen | Ruder |
+Alles geht nur mit Tastatur, die Maus ist optional.
 
-Shift: Zoom · C: Umschauen · Mausrad: Kameraabstand · F: Sperrfeuer · Tab: Punktetabelle · Esc: Pause
+| | Flugzeug | Schiff | Panzer |
+|---|---|---|---|
+| Pfeiltasten | Nicken und Rollen | Zielen | Turm und Rohr |
+| W / S | Schub | Fahrstufe | Fahren |
+| A / D | Seitenruder | Ruder | Drehen |
+| Leertaste | Bordwaffen | Feuer | Feuer |
+| E | Bomben, Raketen, Torpedo | Torpedos | |
+| Maus (optional) | Flugzeug fliegt zur Blickrichtung | Zielen | Zielen |
+
+Shift: Zoom · F: Sperrfeuer · Tab: Punktetabelle · Esc: Pause · Im Hangar: Pfeile wählen, Enter steigt ein
 
 ## Aufbau
 
@@ -53,7 +58,9 @@ web/
   js/vehicles.js    Fahrzeugwerte, Flug- und Schiffsphysik, Waffen
   js/ai.js          KI für Flugzeuge und Schiffe
   js/weapons.js     Geschosse, Treffer, Splitterschaden
-  js/world.js       Meer, Inseln, Himmel, Wolken
+  js/world.js       Meer, Inseln, Himmel, Wolken, Kartenwechsel
+  js/city.js        Stadtkarte: Straßenraster, Gebäude, Plätze
+  js/preview.js     Vorschaubilder der Fahrzeuge für den Hangar
   js/models.js      Low-Poly-Modelle aus Grundkörpern
   js/effects.js     Feuer, Rauch, Gischt
   js/hud.js         Anzeigen, Minikarte
@@ -67,7 +74,7 @@ web/
 
 Grafikstufe „Niedrig“ schaltet Nachbearbeitung, Schatten und Explosionslichter ab, für ältere Schul-PCs.
 
-Alle Dateien werden mit `?v=N` eingebunden, damit Browser nach einem Update keine alten Module aus dem Cache mischen. Bei jeder Veröffentlichung `N` erhöhen (in `web/index.html` und in allen `import`-Zeilen unter `web/js/`).
+Alle Dateien werden mit `?v=N` eingebunden, damit Browser nach einem Update keine alten Module aus dem Cache mischen. Bei jeder Veröffentlichung `python3 tools/bump_version.py` ausführen.
 
 Für automatisierte Tests gibt es `index.html?debug` (stellt `window.__dbg` bereit).
 

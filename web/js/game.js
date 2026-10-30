@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { createUnit, PLANES, SHIPS, DEFS } from './vehicles.js?v=9';
-import { PlaneAI, ShipAI } from './ai.js?v=9';
-import { Projectiles } from './weapons.js?v=9';
-import { rand, pick, clamp } from './util.js?v=9';
+import { createUnit, PLANES, SHIPS, TANKS, DEFS } from './vehicles.js?v=11';
+import { PlaneAI, ShipAI, TankAI } from './ai.js?v=11';
+import { CITY_ZONES } from './city.js?v=11';
+import { Projectiles } from './weapons.js?v=11';
+import { rand, pick, clamp } from './util.js?v=11';
 
 const NAMES = ['Krause', 'Wagner', 'Becker', 'Schulz', 'Hoffmann', 'Koch', 'Richter', 'Wolf', 'Neumann', 'Schwarz',
   'Zimmermann', 'Braun', 'Hartmann', 'Lange', 'Werner', 'Lehmann', 'Köhler', 'Vogel', 'Frank', 'Berger',
@@ -12,14 +13,19 @@ export const SKILL = { leicht: 0.35, normal: 0.6, schwer: 0.85 };
 export const TEAM_NAMES = ['Blau', 'Rot'];
 export const PER_TEAM = 7;
 
-// Serien-Belohnungen
+// Serien-Belohnungen. Fahrzeuge werden über DEFS[id].unlock freigeschaltet.
 export const STREAKS = [
   { n: 2, id: 'repair', label: 'Feldreparatur', text: '50 % Zustand wiederhergestellt' },
-  { n: 3, id: 'unlock1', label: 'Freigeschaltet', unlock: ['habicht', 'zerstoerer'] },
-  { n: 4, id: 'escort', label: 'Begleitschutz', text: 'Zwei Jäger fliegen mit dir' },
-  { n: 5, id: 'unlock2', label: 'Freigeschaltet', unlock: ['bussard', 'kreuzer'] },
+  { n: 4, id: 'escort', label: 'Begleitschutz', text: 'Zwei Begleiter an deiner Seite' },
   { n: 7, id: 'barrage', label: 'Sperrfeuer', text: 'F drücken: Artillerie auf das Ziel' },
 ];
+
+export const MAPS = {
+  sea: { name: 'Inselmeer', kinds: ['plane', 'ship'] },
+  city: { name: 'Stadt', kinds: ['tank'] },
+};
+
+const makeAI = (u, game) => (u.kind === 'plane' ? new PlaneAI(u, game) : u.kind === 'tank' ? new TankAI(u, game) : new ShipAI(u, game));
 
 const newStats = () => ({ kills: 0, deaths: 0, caps: 0, bestStreak: 0, damage: 0 });
 
@@ -42,6 +48,11 @@ class RemoteCtrl {
       c.throttle = clamp(i.th ?? 1, 0, 1);
       c.fire = !!i.f1;
       c.fire2 = !!i.f2;
+    } else if (u.kind === 'tank') {
+      c.throttle = clamp(i.th || 0, -0.5, 1);
+      c.steer = clamp(i.ru || 0, -1, 1);
+      c.aimPoint = i.ap ? this.aim.fromArray(i.ap) : null;
+      c.fire = !!i.f1;
     } else {
       c.throttle = clamp(i.th ?? 0.5, -0.25, 1);
       u.throttleStep = i.st;
@@ -53,8 +64,17 @@ class RemoteCtrl {
   }
 }
 
+export function zonesFor(map) {
+  const src = map === 'city' ? CITY_ZONES : [
+    { name: 'A', x: -1600, z: 0, r: 330 }, { name: 'B', x: 0, z: 0, r: 330 }, { name: 'C', x: 1600, z: 0, r: 330 },
+  ];
+  return src.map((z) => ({ ...z, v: 0, owner: -1, inside: [0, 0] }));
+}
+
 export class Game {
-  constructor({ scene, world, effects, audio, settings, unlocks, hooks }) {
+  constructor({ scene, world, effects, audio, settings, unlocks, hooks, map = 'sea' }) {
+    this.map = map;
+    world.setMap(map);
     this.scene = scene;
     this.world = world;
     this.effects = effects;
@@ -68,11 +88,7 @@ export class Game {
     this.duration = 15 * 60;
     this.tickets = [800, 800];
     this.maxTickets = 800;
-    this.zones = [
-      { name: 'A', x: -1600, z: 0, r: 330, v: 0, owner: -1 },
-      { name: 'B', x: 0, z: 0, r: 330, v: 0, owner: -1 },
-      { name: 'C', x: 1600, z: 0, r: 330, v: 0, owner: -1 },
-    ];
+    this.zones = zonesFor(map);
     this.respawnQueue = [];
     this.barrages = [];
     this.over = false;
@@ -112,6 +128,10 @@ export class Game {
     if (playerDef) this.spawnHuman(this.local, playerDef);
     for (let team = 0; team < 2; team++) {
       const n = Math.max(0, PER_TEAM - this.humansOn(team));
+      if (this.map === 'city') {
+        for (let i = 0; i < n; i++) this.spawnBot(team, 'tank', this.botName());
+        continue;
+      }
       let planes = Math.round(n * 0.5);
       if (playerDef && team === localTeam) planes += DEFS[playerDef].kind === 'plane' ? -1 : 1;
       planes = clamp(planes, 0, n);
@@ -121,6 +141,15 @@ export class Game {
 
   spawnPoint(team, kind) {
     const s = team === 0 ? 1 : -1;
+    if (kind === 'tank') {
+      for (let tries = 0; tries < 40; tries++) {
+        const pos = new THREE.Vector3(Math.round(rand(-5, 5)) * 130 + rand(-40, 40), 0, s * (1170 + rand(-15, 15)));
+        if (this.world.heightAt(pos.x, pos.z) > 0.5) continue;
+        if (this.units.some((u) => u.kind === 'tank' && u.alive && u.pos.distanceTo(pos) < 16)) continue;
+        return { pos, heading: team === 0 ? 0 : Math.PI };
+      }
+      return { pos: new THREE.Vector3(rand(-600, 600), 0, s * 1220), heading: team === 0 ? 0 : Math.PI };
+    }
     if (kind === 'plane') {
       return { pos: new THREE.Vector3(rand(-1400, 1400), rand(550, 800), s * rand(3100, 3350)), heading: team === 0 ? 0 : Math.PI };
     }
@@ -135,9 +164,10 @@ export class Game {
   }
 
   botDef(kind) {
-    const list = kind === 'plane' ? PLANES : SHIPS;
-    const w = kind === 'plane' ? [0.45, 0.3, 0.25] : [0.35, 0.4, 0.25];
-    let r = Math.random();
+    const list = kind === 'plane' ? PLANES : kind === 'tank' ? TANKS : SHIPS;
+    // Leichte Fahrzeuge häufiger als schwere
+    const w = list.map((id) => 1 / (1 + DEFS[id].unlock * 0.35));
+    let r = Math.random() * w.reduce((a, b) => a + b, 0);
     for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return list[i]; }
     return list[0];
   }
@@ -145,13 +175,18 @@ export class Game {
   spawnBot(team, kind, name, defId = null, escortOf = null) {
     const id = defId || this.botDef(kind);
     const u = createUnit(this, id, team, name, false);
-    u.ai = u.kind === 'plane' ? new PlaneAI(u, this) : new ShipAI(u, this);
+    u.ai = makeAI(u, this);
     if (escortOf) {
       u.ai.escortOf = escortOf;
       u.escort = true;
-      const p = escortOf.pos.clone().add(new THREE.Vector3(rand(-80, 80), 40, rand(60, 120)));
-      p.y = Math.max(p.y, 300);
-      u.spawn(p, escortOf.kind === 'plane' ? Math.atan2(-escortOf.fwd.x, -escortOf.fwd.z) : 0);
+      if (u.kind === 'tank') {
+        const sp = this.spawnPoint(team, 'tank');
+        u.spawn(sp.pos, sp.heading);
+      } else {
+        const p = escortOf.pos.clone().add(new THREE.Vector3(rand(-80, 80), 40, rand(60, 120)));
+        p.y = Math.max(p.y, 300);
+        u.spawn(p, escortOf.kind === 'plane' ? Math.atan2(-escortOf.fwd.x, -escortOf.fwd.z) : 0);
+      }
     } else {
       const sp = this.spawnPoint(team, u.kind);
       u.spawn(sp.pos, sp.heading);
@@ -199,10 +234,11 @@ export class Game {
     const u = h.unit;
     if (u && u.alive) {
       u.human = null; u.remote = null;
-      u.ai = u.kind === 'plane' ? new PlaneAI(u, this) : new ShipAI(u, this);
+      u.ai = makeAI(u, this);
     } else {
       if (u) { u.dispose(); this.units.splice(this.units.indexOf(u), 1); }
-      this.respawnQueue.push({ t: this.time + 3, team: h.team, kind: Math.random() < 0.5 ? 'plane' : 'ship', name: this.botName() });
+      const kind = this.map === 'city' ? 'tank' : Math.random() < 0.5 ? 'plane' : 'ship';
+      this.respawnQueue.push({ t: this.time + 3, team: h.team, kind, name: this.botName() });
     }
   }
 
@@ -229,6 +265,7 @@ export class Game {
     if (attacker && attacker.team === u.team) return;
     // Schiffe sind gegen MG-Feuer gepanzert
     if (u.kind === 'ship' && type === 'bullet') amount *= u.def.id === 'schnellboot' ? 0.6 : 0.2;
+    if (u.kind === 'tank') amount *= type === 'bullet' ? 0.1 : u.def.armor;
     const dealt = Math.min(amount, u.hp);
     u.hp -= amount;
     if (attacker) { u.lastAttacker = attacker; u.lastHit = this.time; }
@@ -252,8 +289,9 @@ export class Game {
     u.alive = false;
     u.deathTime = this.time;
     if (u.kind === 'ship') this.blast(u.pos.clone().setY(u.def.top * 0.6), 3 + u.def.beam * 0.2, 0, 3);
+    else if (u.kind === 'tank') this.blast(u.pos.clone().setY(1.5), 2, 0, 2);
     else this.blast(u.pos, 1.5);
-    this.tickets[u.team] = Math.max(0, this.tickets[u.team] - (u.kind === 'ship' ? 15 : 6));
+    this.tickets[u.team] = Math.max(0, this.tickets[u.team] - (u.kind === 'ship' ? 15 : u.kind === 'tank' ? 12 : 6));
     const credited = killer && killer !== u && killer.team !== u.team;
     if (credited) {
       killer.kills++;
@@ -280,19 +318,19 @@ export class Game {
 
   streakReward(p) {
     const h = p.human;
+    const fresh = Object.keys(DEFS).filter((id) => DEFS[id].unlock > 0 && DEFS[id].unlock <= p.streak && !h.unlocks.has(id));
+    if (fresh.length) {
+      fresh.forEach((id) => h.unlocks.add(id));
+      h.hooks.unlocked(fresh);
+    }
     for (const s of STREAKS) {
       if (s.n !== p.streak) continue;
       if (s.id === 'repair') {
         p.hp = Math.min(p.def.hp, p.hp + p.def.hp * 0.5);
         h.hooks.reward(s.label, s.text);
-      } else if (s.unlock) {
-        const fresh = s.unlock.filter((id) => !h.unlocks.has(id));
-        if (fresh.length) {
-          fresh.forEach((id) => h.unlocks.add(id));
-          h.hooks.unlocked(fresh);
-        }
       } else if (s.id === 'escort') {
-        for (let i = 0; i < 2; i++) this.spawnBot(p.team, 'plane', 'Rotte ' + (i + 1), 'falke', p);
+        const kind = p.kind === 'tank' ? 'tank' : 'plane';
+        for (let i = 0; i < 2; i++) this.spawnBot(p.team, kind, 'Rotte ' + (i + 1), kind === 'tank' ? 'dachs' : 'falke', p);
         h.hooks.reward(s.label, s.text);
       } else if (s.id === 'barrage') {
         p.barrageReady = true;
@@ -357,7 +395,7 @@ export class Game {
     for (const z of this.zones) {
       const n = [0, 0];
       for (const u of this.units) {
-        if (u.kind !== 'ship' || !u.alive) continue;
+        if ((u.kind !== 'ship' && u.kind !== 'tank') || !u.alive) continue;
         if (Math.hypot(u.pos.x - z.x, u.pos.z - z.z) < z.r) n[u.team]++;
       }
       z.inside = n;
@@ -382,7 +420,7 @@ export class Game {
     z.owner = team;
     for (const h of this.humans.values()) {
       const p = h.unit;
-      if (p && p.alive && p.team === team && p.kind === 'ship' && Math.hypot(p.pos.x - z.x, p.pos.z - z.z) < z.r) h.stats.caps++;
+      if (p && p.alive && p.team === team && p.kind !== 'plane' && Math.hypot(p.pos.x - z.x, p.pos.z - z.z) < z.r) h.stats.caps++;
     }
     this.hooks.zone(z, team);
     this.emit(['z', this.zones.indexOf(z), team]);

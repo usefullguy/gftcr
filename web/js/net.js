@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { createUnit, DEFS } from './vehicles.js?v=9';
-import { Projectiles } from './weapons.js?v=9';
-import { PER_TEAM } from './game.js?v=9';
+import { createUnit, DEFS } from './vehicles.js?v=11';
+import { Projectiles } from './weapons.js?v=11';
+import { PER_TEAM, zonesFor } from './game.js?v=11';
 
 // Mehrspieler über WebRTC (PeerJS). Der Host rechnet das Spiel, Clients senden Eingaben
 // und bekommen ~15-mal pro Sekunde den Spielstand.
@@ -57,7 +57,7 @@ export class NetHost {
     this.code = code;
     this.isPublic = isPublic;
     this.peers = new Map(); // peerId -> { conn, name, team, unlocks, out }
-    this.settings = { mode: isPublic ? 'versus' : 'coop', difficulty: 'normal' };
+    this.settings = { mode: isPublic ? 'versus' : 'coop', difficulty: 'normal', map: 'sea' };
     this.hostName = name;
     this.hostTeam = 0;
     this.game = null;
@@ -111,7 +111,7 @@ export class NetHost {
           // Einstieg in ein laufendes Gefecht
           const h = this.humanFor(id, p);
           this.game.addHuman(h);
-          p.conn.send({ t: 'start', you: id, team: p.team, code: this.code });
+          p.conn.send({ t: 'start', you: id, team: p.team, code: this.code, map: this.game.map });
           this.game.hooks.notice(`${p.name} ist beigetreten`);
         }
         this.broadcastLobby();
@@ -193,7 +193,7 @@ export class NetHost {
   }
 
   startGame() {
-    for (const [id, p] of this.peers) if (p.conn.open) p.conn.send({ t: 'start', you: id, team: p.team, code: this.code });
+    for (const [id, p] of this.peers) if (p.conn.open) p.conn.send({ t: 'start', you: id, team: p.team, code: this.code, map: this.game.map });
     this.broadcastLobby();
   }
 
@@ -221,7 +221,7 @@ export class NetHost {
     for (const u of g.units) {
       if (u.removed && !u.human) continue;
       const q = u.root.quaternion;
-      const ap = u.kind === 'ship' && u.ctrl.aimPoint ? [r1(u.ctrl.aimPoint.x), r1(u.ctrl.aimPoint.y), r1(u.ctrl.aimPoint.z)] : 0;
+      const ap = u.kind !== 'plane' && u.ctrl.aimPoint ? [r1(u.ctrl.aimPoint.x), r1(u.ctrl.aimPoint.y), r1(u.ctrl.aimPoint.z)] : 0;
       units.push([
         u.id, DEF_IDS.indexOf(u.def.id), u.team, u.remote || (u.isPlayer ? 'host' : ''), u.name,
         r1(u.pos.x), r1(u.pos.y), r1(u.pos.z), r3(q.x), r3(q.y), r3(q.z), r3(q.w),
@@ -338,7 +338,9 @@ export async function findRandom({ name, unlocks }) {
 const _q = new THREE.Quaternion(), _v = new THREE.Vector3();
 
 export class ClientGame {
-  constructor({ scene, world, effects, audio, settings, unlocks, hooks, net }) {
+  constructor({ scene, world, effects, audio, settings, unlocks, hooks, net, map = 'sea' }) {
+    this.map = map;
+    world.setMap(map);
     this.scene = scene;
     this.world = world;
     this.effects = effects;
@@ -354,11 +356,7 @@ export class ClientGame {
     this.duration = 15 * 60;
     this.tickets = [800, 800];
     this.maxTickets = 800;
-    this.zones = [
-      { name: 'A', x: -1600, z: 0, r: 330, v: 0, owner: -1, inside: [0, 0] },
-      { name: 'B', x: 0, z: 0, r: 330, v: 0, owner: -1, inside: [0, 0] },
-      { name: 'C', x: 1600, z: 0, r: 330, v: 0, owner: -1, inside: [0, 0] },
-    ];
+    this.zones = zonesFor(map);
     this.over = false;
     this.winner = -1;
     this.me = null;
@@ -417,7 +415,7 @@ export class ClientGame {
         u.target = new THREE.Vector3(x, y, z);
         u.targetQ = new THREE.Quaternion(qx, qy, qz, qw);
         u.snapAt = now;
-        if (u.kind === 'ship') { u.ctrl.aimPoint = null; u.apVec = new THREE.Vector3(); }
+        if (u.kind !== 'plane') { u.ctrl.aimPoint = null; u.apVec = new THREE.Vector3(); }
         this.byId.set(id, u);
         this.units.push(u);
       }
@@ -438,7 +436,7 @@ export class ClientGame {
       // Eigene Einheit: Schub und Zielpunkt kommen aus der lokalen Steuerung
       if (owner !== this.net.id) {
         u.ctrl.throttle = th;
-        if (u.kind === 'ship') u.ctrl.aimPoint = ap ? u.apVec.fromArray(ap) : null;
+        if (u.kind !== 'plane') u.ctrl.aimPoint = ap ? u.apVec.fromArray(ap) : null;
       }
     }
     for (const u of [...this.units]) if (!seen.has(u.id)) this.removeUnit(u);
@@ -478,7 +476,7 @@ export class ClientGame {
         if (type === 'bullet') {
           this.effects.muzzle(pos, dir, size);
           this.audio.shot(flak ? 'mg' : size > 1.2 ? 'cannon' : 'mg', pos, owner === this.player);
-        } else if (type === 'shell' && owner.kind === 'ship') {
+        } else if (type === 'shell' && (owner.kind === 'ship' || owner.kind === 'tank')) {
           this.effects.cannonBlast(pos, dir, size * 1.6);
           this.audio.shot(size < 0.5 ? 'cannon' : 'big', pos, owner === this.player);
         } else if (type === 'rocket') this.audio.shot('rocket', pos, owner === this.player);
@@ -541,12 +539,12 @@ export class ClientGame {
       u.pos.copy(u.root.position);
       u.fwd.set(0, 0, -1).applyQuaternion(u.root.quaternion);
       u.root.updateMatrixWorld(true);
-      if (u.kind === 'ship') {
+      if (u.kind !== 'plane') {
         u.heading = Math.atan2(-u.fwd.x, -u.fwd.z);
         u.inv.copy(u.root.matrixWorld).invert();
         const fire = u.ctrl.fire;
         u.ctrl.fire = false;
-        u.updateTurrets(dt);
+        if (u.kind === 'tank') u.updateTurret(dt); else u.updateTurrets(dt);
         u.ctrl.fire = fire;
       } else {
         u.bounds = Math.hypot(u.pos.x, u.pos.z) > 3500;

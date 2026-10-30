@@ -1,38 +1,96 @@
 import * as THREE from 'three';
-import { buildModel } from './models.js?v=9';
-import { waveHeight, MAP_HALF } from './world.js?v=9';
-import { clamp, angleDiff, elevationFor, rand } from './util.js?v=9';
+import { buildModel } from './models.js?v=11';
+import { waveHeight, MAP_HALF } from './world.js?v=11';
+import { clamp, angleDiff, elevationFor, rand } from './util.js?v=11';
 
+const MG = (rate, mounts) => ({ name: 'MG 7,9 mm', rate, dmg: 10, speed: 950, spread: 0.005, range: 900, heat: 0.012, size: 1, mounts });
+const CANNON = (name, rate, dmg, speed, size, mounts) => ({ name, rate, dmg, speed, spread: 0.004, range: 850, heat: 0.03, size, mounts });
+
+// unlock: nötige Abschuss-Serie (0 = von Anfang an frei)
 export const DEFS = {
+  // ---------- Flugzeuge ----------
+  sperber: {
+    id: 'sperber', kind: 'plane', name: 'Sperber', klasse: 'Leichter Jäger', unlock: 0,
+    desc: 'Das wendigste Flugzeug. Drei MGs, kaum Panzerung.',
+    hp: 140, maxSpeed: 160, minSpeed: 46, thrust: 30, pitchRate: 2.0, rollRate: 4.3, yawRate: 0.55, hitR: 6,
+    guns: [MG(26, [[1.8, -0.35, -1.6], [-1.8, -0.35, -1.6], [0, 0.55, -2.6]])],
+    secondary: null,
+    stats: { tempo: 0.88, panzer: 0.2, feuer: 0.35, wendig: 1 },
+  },
   falke: {
-    id: 'falke', kind: 'plane', name: 'Falke', klasse: 'Jäger',
+    id: 'falke', kind: 'plane', name: 'Falke', klasse: 'Jäger', unlock: 0,
     desc: 'Leicht, schnell, dreht eng. Zwei MGs. Hält wenig aus.',
     hp: 170, maxSpeed: 168, minSpeed: 52, thrust: 31, pitchRate: 1.75, rollRate: 3.6, yawRate: 0.5, hitR: 6.5,
-    guns: [{ name: 'MG 7,9 mm', rate: 20, dmg: 10, speed: 950, spread: 0.005, range: 900, heat: 0.012, size: 1, mounts: [[2.1, -0.45, -1.9], [-2.1, -0.45, -1.9]] }],
+    guns: [MG(20, [[2.1, -0.45, -1.9], [-2.1, -0.45, -1.9]])],
     secondary: null,
     stats: { tempo: 0.95, panzer: 0.3, feuer: 0.4, wendig: 0.95 },
   },
+  specht: {
+    id: 'specht', kind: 'plane', name: 'Specht', klasse: 'Schlachtflugzeug', unlock: 3,
+    desc: 'Gepanzerter Tiefflieger. Zwei Kanonen und acht Raketen gegen Schiffe.',
+    hp: 310, maxSpeed: 145, minSpeed: 50, thrust: 25, pitchRate: 1.4, rollRate: 2.6, yawRate: 0.45, hitR: 7.5,
+    guns: [CANNON('Kanone 20 mm', 8, 28, 820, 1.5, [[2.2, -0.5, -2.0], [-2.2, -0.5, -2.0]])],
+    secondary: { type: 'rocket', name: 'Raketen', count: 8, rearm: 6, dmg: 300, splash: 14 },
+    stats: { tempo: 0.75, panzer: 0.7, feuer: 0.8, wendig: 0.6 },
+  },
   habicht: {
-    id: 'habicht', kind: 'plane', name: 'Habicht', klasse: 'Zerstörerflugzeug',
+    id: 'habicht', kind: 'plane', name: 'Habicht', klasse: 'Zerstörerflugzeug', unlock: 3,
     desc: 'Zweimotorig. Zwei Kanonen in der Nase und sechs Raketen gegen Schiffe.',
     hp: 290, maxSpeed: 155, minSpeed: 58, thrust: 27, pitchRate: 1.3, rollRate: 2.4, yawRate: 0.4, hitR: 8,
-    guns: [
-      { name: 'Kanone 20 mm', rate: 8, dmg: 30, speed: 820, spread: 0.004, range: 850, heat: 0.03, size: 1.6, mounts: [[0.45, -0.5, -5.6], [-0.45, -0.5, -5.6]] },
-    ],
+    guns: [CANNON('Kanone 20 mm', 8, 30, 820, 1.6, [[0.45, -0.5, -5.6], [-0.45, -0.5, -5.6]])],
     secondary: { type: 'rocket', name: 'Raketen', count: 6, rearm: 7, dmg: 280, splash: 14 },
     stats: { tempo: 0.8, panzer: 0.55, feuer: 0.75, wendig: 0.6 },
   },
+  uhu: {
+    id: 'uhu', kind: 'plane', name: 'Uhu', klasse: 'Schwerer Jäger', unlock: 4,
+    desc: 'Zwei 30-mm-Kanonen und zwei MGs. Wenige Treffer reichen.',
+    hp: 340, maxSpeed: 160, minSpeed: 60, thrust: 29, pitchRate: 1.25, rollRate: 2.2, yawRate: 0.4, hitR: 8.5,
+    guns: [
+      CANNON('Kanone 30 mm', 5, 55, 700, 2, [[0.5, -0.6, -6.0], [-0.5, -0.6, -6.0]]),
+      MG(16, [[0.3, 0.2, -6.2], [-0.3, 0.2, -6.2]]),
+    ],
+    secondary: null,
+    stats: { tempo: 0.85, panzer: 0.65, feuer: 0.9, wendig: 0.5 },
+  },
+  moewe: {
+    id: 'moewe', kind: 'plane', name: 'Möwe', klasse: 'Torpedoflugzeug', unlock: 4,
+    desc: 'Wasserflugzeug mit Lufttorpedo. Tief anfliegen, abwerfen, abdrehen.',
+    hp: 300, maxSpeed: 128, minSpeed: 44, thrust: 21, pitchRate: 1.15, rollRate: 1.9, yawRate: 0.42, hitR: 9,
+    guns: [MG(14, [[2.6, -0.4, -1.6], [-2.6, -0.4, -1.6]])],
+    secondary: { type: 'airtorp', name: 'Lufttorpedo', count: 1, rearm: 18, dmg: 1600, splash: 0 },
+    tailGun: true,
+    stats: { tempo: 0.55, panzer: 0.55, feuer: 0.9, wendig: 0.45 },
+  },
   bussard: {
-    id: 'bussard', kind: 'plane', name: 'Bussard', klasse: 'Sturzkampfbomber',
+    id: 'bussard', kind: 'plane', name: 'Bussard', klasse: 'Sturzkampfbomber', unlock: 5,
     desc: 'Langsam, aber zwei schwere Bomben. Heckschütze schießt automatisch.',
     hp: 340, maxSpeed: 132, minSpeed: 48, thrust: 22, pitchRate: 1.15, rollRate: 2.0, yawRate: 0.4, hitR: 8.5,
-    guns: [{ name: 'MG 7,9 mm', rate: 14, dmg: 10, speed: 950, spread: 0.006, range: 850, heat: 0.015, size: 1, mounts: [[2.4, -0.6, -1.8], [-2.4, -0.6, -1.8]] }],
+    guns: [MG(14, [[2.4, -0.6, -1.8], [-2.4, -0.6, -1.8]])],
     secondary: { type: 'bomb', name: 'Bomben 500 kg', count: 2, rearm: 14, dmg: 1300, splash: 32 },
     tailGun: true,
     stats: { tempo: 0.6, panzer: 0.65, feuer: 0.95, wendig: 0.4 },
   },
+  kondor: {
+    id: 'kondor', kind: 'plane', name: 'Kondor', klasse: 'Schwerer Bomber', unlock: 6,
+    desc: 'Vier Motoren, vier Bomben, zwei Bordschützen. Träge, aber zäh.',
+    hp: 760, maxSpeed: 122, minSpeed: 50, thrust: 19, pitchRate: 0.8, rollRate: 1.15, yawRate: 0.3, hitR: 14,
+    guns: [MG(12, [[0, -0.6, -8.6]])],
+    secondary: { type: 'bomb', name: 'Bomben 500 kg', count: 4, rearm: 11, dmg: 1300, splash: 32 },
+    tailGun: true,
+    stats: { tempo: 0.5, panzer: 1, feuer: 1, wendig: 0.2 },
+  },
+  milan: {
+    id: 'milan', kind: 'plane', name: 'Milan', klasse: 'Strahljäger', unlock: 7,
+    desc: 'Düsenantrieb. Viel schneller als alles andere, dreht aber weit.',
+    hp: 230, maxSpeed: 235, minSpeed: 80, thrust: 42, pitchRate: 1.45, rollRate: 2.9, yawRate: 0.35, hitR: 7.5,
+    guns: [CANNON('Kanone 30 mm', 9, 42, 760, 1.8, [[0.35, -0.3, -5.2], [-0.35, -0.3, -5.2], [0.35, 0.2, -5.2], [-0.35, 0.2, -5.2]])],
+    secondary: null,
+    stats: { tempo: 1, panzer: 0.45, feuer: 0.95, wendig: 0.45 },
+  },
+
+  // ---------- Schiffe ----------
   schnellboot: {
-    id: 'schnellboot', kind: 'ship', name: 'Schnellboot', klasse: 'Torpedoboot',
+    id: 'schnellboot', kind: 'ship', name: 'Schnellboot', klasse: 'Torpedoboot', unlock: 0,
     desc: 'Klein und schnell. Zwei Torpedos können einen Kreuzer versenken.',
     hp: 950, maxSpeed: 30, accel: 5, turn: 0.38, len: 32, beam: 5.6, top: 7, draft: 1.3, camDist: 48,
     torpedo: { count: 2, rearm: 22, dmg: 1500, speed: 40 },
@@ -40,7 +98,7 @@ export const DEFS = {
     stats: { tempo: 1, panzer: 0.25, feuer: 0.55, wendig: 0.95 },
   },
   zerstoerer: {
-    id: 'zerstoerer', kind: 'ship', name: 'Zerstörer', klasse: 'Zerstörer',
+    id: 'zerstoerer', kind: 'ship', name: 'Zerstörer', klasse: 'Zerstörer', unlock: 3,
     desc: 'Vier 12-cm-Geschütze, Torpedos und Flak. Der Allrounder.',
     hp: 2700, maxSpeed: 21, accel: 2.6, turn: 0.17, len: 100, beam: 10.5, top: 14, draft: 3.2, camDist: 120,
     torpedo: { count: 3, rearm: 35, dmg: 1500, speed: 36 },
@@ -48,12 +106,35 @@ export const DEFS = {
     stats: { tempo: 0.7, panzer: 0.55, feuer: 0.7, wendig: 0.6 },
   },
   kreuzer: {
-    id: 'kreuzer', kind: 'ship', name: 'Kreuzer', klasse: 'Schwerer Kreuzer',
+    id: 'kreuzer', kind: 'ship', name: 'Kreuzer', klasse: 'Schwerer Kreuzer', unlock: 5,
     desc: 'Zwölf 20,3-cm-Rohre und viel Panzerung. Dreht langsam.',
     hp: 5400, maxSpeed: 17, accel: 1.6, turn: 0.1, len: 160, beam: 17, top: 22, draft: 5.5, camDist: 190,
     torpedo: null,
     aa: [[7, 7, -2], [-7, 7, -2], [7, 7, 8], [-7, 7, 8]],
     stats: { tempo: 0.5, panzer: 1, feuer: 1, wendig: 0.3 },
+  },
+
+  // ---------- Panzer ----------
+  dachs: {
+    id: 'dachs', kind: 'tank', name: 'Dachs', klasse: 'Leichter Panzer', unlock: 0,
+    desc: 'Schnell und wendig. Die 5-cm-Kanone lädt zügig nach.',
+    hp: 620, maxSpeed: 16, accel: 7, turn: 1.25, traverse: 1.4, len: 6.2, beam: 3.0, top: 2.6, draft: 0, camDist: 15, armor: 0.9,
+    gun: { name: '5-cm-Kanone', dmg: 140, speed: 830, reload: 2.2, size: 0.35, range: 900 },
+    stats: { tempo: 1, panzer: 0.35, feuer: 0.45, wendig: 1 },
+  },
+  keiler: {
+    id: 'keiler', kind: 'tank', name: 'Keiler', klasse: 'Mittlerer Panzer', unlock: 3,
+    desc: 'Schräge Panzerung und eine 7,5-cm-Kanone. Gutes Mittelmaß.',
+    hp: 950, maxSpeed: 13, accel: 5, turn: 0.95, traverse: 1.0, len: 7.0, beam: 3.3, top: 2.8, draft: 0, camDist: 17, armor: 0.7,
+    gun: { name: '7,5-cm-Kanone', dmg: 230, speed: 820, reload: 3.4, size: 0.45, range: 1000 },
+    stats: { tempo: 0.75, panzer: 0.65, feuer: 0.7, wendig: 0.7 },
+  },
+  wisent: {
+    id: 'wisent', kind: 'tank', name: 'Wisent', klasse: 'Schwerer Panzer', unlock: 5,
+    desc: 'Dicke Panzerung, 8,8-cm-Kanone. Langsam, Turm dreht träge.',
+    hp: 1450, maxSpeed: 9.5, accel: 3, turn: 0.6, traverse: 0.6, len: 8.0, beam: 3.7, top: 3.1, draft: 0, camDist: 19, armor: 0.5,
+    gun: { name: '8,8-cm-Kanone', dmg: 360, speed: 880, reload: 5.4, size: 0.55, range: 1200 },
+    stats: { tempo: 0.45, panzer: 1, feuer: 1, wendig: 0.4 },
   },
 };
 
@@ -63,8 +144,10 @@ export const CALIBERS = {
   '203': { name: '20,3-cm-Geschütz', dmg: 430, speed: 680, reload: 7.5, range: 4600, size: 0.9, traverse: 0.32, splash: 12, spread: 0.0025 },
 };
 
-export const PLANES = ['falke', 'habicht', 'bussard'];
-export const SHIPS = ['schnellboot', 'zerstoerer', 'kreuzer'];
+export const PLANES = Object.keys(DEFS).filter((id) => DEFS[id].kind === 'plane');
+export const SHIPS = Object.keys(DEFS).filter((id) => DEFS[id].kind === 'ship');
+export const TANKS = Object.keys(DEFS).filter((id) => DEFS[id].kind === 'tank');
+export const START_UNLOCKS = Object.keys(DEFS).filter((id) => DEFS[id].unlock === 0);
 
 const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
@@ -270,10 +353,10 @@ export class Plane extends Unit {
       }
       if (c.fire2 && this.fire2Cd <= 0 && this.ammo2 > 0) {
         this.ammo2--;
-        if (sec.type === 'bomb') {
+        if (sec.type === 'bomb' || sec.type === 'airtorp') {
           this.fire2Cd = 0.6;
           const p = _v.set(0, -1.6, -0.4).applyMatrix4(this.root.matrixWorld);
-          game.projectiles.fire('bomb', p, this.vel, this, { dmg: sec.dmg, splash: sec.splash, life: 30, size: 1 });
+          game.projectiles.fire('bomb', p, this.vel, this, { dmg: sec.dmg, splash: sec.splash, life: 30, size: 1, torp: sec.type === 'airtorp' });
           game.audio.shot('drop', p, this.isPlayer);
         } else {
           this.fire2Cd = 0.25;
@@ -534,7 +617,155 @@ export class Ship extends Unit {
   }
 }
 
+export class Tank extends Unit {
+  constructor(game, def, team, name, isPlayer) {
+    super(game, def, team, name, isPlayer);
+    const model = buildModel(def.id, team);
+    this.root.add(model.mesh);
+    this.root.rotation.order = 'YXZ';
+    this.turrets = model.turrets;
+    this.turret = this.turrets[0];
+    this.cal = { ...def.gun, traverse: def.traverse };
+    this.heading = 0;
+    this.speed = 0;
+    this.ctrl = { throttle: 0, steer: 0, aimPoint: null, fire: false };
+    this.half = new THREE.Vector3(def.beam / 2, def.top / 2, def.len / 2);
+    this.boxCenterY = def.top / 2;
+    this.inv = new THREE.Matrix4();
+    this.dustAcc = 0;
+    this.deadT = 0;
+    this.bounds = false;
+  }
+
+  spawn(pos, heading) {
+    this.pos.set(pos.x, 0, pos.z);
+    this.heading = heading;
+    this.speed = 0;
+    this.turret.yaw = 0;
+    this.place();
+  }
+
+  place() {
+    this.fwd.set(-Math.sin(this.heading), 0, -Math.cos(this.heading));
+    // leichtes Nicken beim Anfahren/Bremsen
+    const pitch = clamp(-(this.ctrl.throttle * this.def.maxSpeed - this.speed) * 0.004, -0.04, 0.04);
+    this.root.position.set(this.pos.x, this.pos.y, this.pos.z);
+    this.root.rotation.set(this.alive ? pitch : 0.05, this.heading, this.alive ? 0 : 0.06);
+    this.root.updateMatrixWorld(true);
+    this.inv.copy(this.root.matrixWorld).invert();
+    this.vel.copy(this.fwd).multiplyScalar(this.speed);
+  }
+
+  blocked(x, z) {
+    const def = this.def, w = this.game.world;
+    const fx = -Math.sin(this.heading), fz = -Math.cos(this.heading);
+    const rx = -fz, rz = fx;
+    for (const [a, b] of [[0.5, 0.5], [0.5, -0.5], [-0.5, 0.5], [-0.5, -0.5], [0.5, 0]]) {
+      const px = x + fx * def.len * a + rx * def.beam * b, pz = z + fz * def.len * a + rz * def.beam * b;
+      if (w.heightAt(px, pz) > 0.6 || Math.abs(px) > w.half || Math.abs(pz) > w.half) return true;
+    }
+    return false;
+  }
+
+  update(dt) {
+    const def = this.def, c = this.ctrl, game = this.game;
+    if (this.alive) {
+      const target = clamp(c.throttle, -0.5, 1) * def.maxSpeed;
+      const a = def.accel * dt;
+      this.speed += clamp(target - this.speed, -a * 1.6, a);
+      // Ketten: dreht auch im Stand, rückwärts wird die Lenkung gespiegelt
+      this.heading -= c.steer * def.turn * dt * (this.speed < -0.5 ? -1 : 1) * (1 - Math.min(Math.abs(this.speed) / def.maxSpeed, 1) * 0.35);
+      const nx = this.pos.x + -Math.sin(this.heading) * this.speed * dt;
+      const nz = this.pos.z + -Math.cos(this.heading) * this.speed * dt;
+      if (!this.blocked(nx, nz)) { this.pos.x = nx; this.pos.z = nz; }
+      else if (!this.blocked(nx, this.pos.z)) { this.pos.x = nx; this.speed *= 0.9; }
+      else if (!this.blocked(this.pos.x, nz)) { this.pos.z = nz; this.speed *= 0.9; }
+      else this.speed *= -0.15;
+      // Panzer schieben sich gegenseitig
+      for (const o of game.units) {
+        if (o === this || o.kind !== 'tank' || o.removed) continue;
+        const dx = this.pos.x - o.pos.x, dz = this.pos.z - o.pos.z;
+        const d = Math.hypot(dx, dz), min = (def.len + o.def.len) * 0.42;
+        if (d > 0.01 && d < min) {
+          const push = (min - d) * 0.5;
+          const px = this.pos.x + dx / d * push, pz = this.pos.z + dz / d * push;
+          if (!this.blocked(px, pz)) { this.pos.x = px; this.pos.z = pz; }
+        }
+      }
+      this.bounds = Math.max(Math.abs(this.pos.x), Math.abs(this.pos.z)) > game.world.half - 60;
+    } else {
+      this.deadT += dt;
+      this.speed *= 1 - dt * 3;
+      if (this.deadT > 15) { this.removed = true; this.root.visible = false; return; }
+    }
+    this.place();
+    if (this.alive) this.updateTurret(dt);
+    this.fx(dt);
+  }
+
+  updateTurret(dt) {
+    const t = this.turret, c = this.ctrl, cal = this.cal;
+    t.reload -= dt;
+    let wantYaw = t.yaw, wantPitch = 0, inRange = false;
+    if (c.aimPoint) {
+      const wp = t.pitchObj.getWorldPosition(_v);
+      const dx = c.aimPoint.x - wp.x, dz = c.aimPoint.z - wp.z;
+      const dist = Math.hypot(dx, dz);
+      wantYaw = angleDiff(0, Math.atan2(-dx, -dz) - this.heading);
+      const e = elevationFor(dist, c.aimPoint.y - wp.y, cal.speed);
+      inRange = e !== null && dist <= cal.range * 1.3;
+      wantPitch = e === null ? 0.3 : clamp(e, -0.15, 0.35);
+    }
+    const step = cal.traverse * dt;
+    t.yaw += clamp(angleDiff(t.yaw, wantYaw), -step, step);
+    t.pitch += clamp(wantPitch - t.pitch, -step, step);
+    t.yawObj.rotation.y = t.yaw;
+    t.pitchObj.rotation.x = t.pitch;
+    t.ready = t.reload <= 0 && Math.abs(angleDiff(t.yaw, wantYaw)) < 0.02 && Math.abs(wantPitch - t.pitch) < 0.015 && inRange;
+    if (c.fire && t.reload <= 0 && Math.abs(angleDiff(t.yaw, wantYaw)) < 0.05) this.fireGun();
+  }
+
+  fireGun() {
+    const t = this.turret, cal = this.cal, game = this.game;
+    t.reload = cal.reload * (this.isPlayer || this.remote ? 1 : rand(1, 1.3));
+    t.pitchObj.updateMatrixWorld(true);
+    const muzzle = _v.set(0, 0, -t.barrelLen).applyMatrix4(t.pitchObj.matrixWorld);
+    const yawW = this.heading + t.yaw, ce = Math.cos(t.pitch);
+    const dir = _v2.set(-Math.sin(yawW) * ce, Math.sin(t.pitch), -Math.cos(yawW) * ce);
+    const sp = this.isPlayer || this.remote ? 0.0015 : 0.004;
+    dir.x += rand(-sp, sp); dir.y += rand(-sp, sp); dir.z += rand(-sp, sp);
+    dir.normalize();
+    game.projectiles.fire('shell', muzzle, _v3.copy(dir).multiplyScalar(cal.speed), this, { dmg: cal.dmg, splash: 4, life: 3, size: cal.size });
+    game.effects.cannonBlast(muzzle, dir, cal.size * 2.2);
+    game.audio.shot(cal.size > 0.5 ? 'big' : 'cannon', muzzle, this.isPlayer);
+    if (this.isPlayer && game.hooks.recoil) game.hooks.recoil(cal.size * 0.8);
+  }
+
+  fx(dt) {
+    const def = this.def, game = this.game;
+    const sp = Math.abs(this.speed);
+    this.dustAcc += dt * sp * 0.6 * game.effects.density;
+    while (this.dustAcc > 1) {
+      this.dustAcc -= 1;
+      const side = Math.random() > 0.5 ? 1 : -1;
+      _v.set(side * def.beam * 0.4, 0.3, def.len * 0.45).applyMatrix4(this.root.matrixWorld);
+      game.effects.dust(_v, 0.8);
+    }
+    const f = this.hpFrac;
+    if (!this.alive || f < 0.5) {
+      this.burnAcc += dt * (this.alive ? (f < 0.25 ? 10 : 4) : 12);
+      while (this.burnAcc > 1) {
+        this.burnAcc -= 1;
+        _v.set(rand(-0.3, 0.3) * def.beam, def.top, rand(-0.3, 0.3) * def.len).applyMatrix4(this.root.matrixWorld);
+        game.effects.burn(_v, 0.8, null);
+      }
+    }
+  }
+}
+
 export function createUnit(game, defId, team, name, isPlayer) {
   const def = DEFS[defId];
-  return def.kind === 'plane' ? new Plane(game, def, team, name, isPlayer) : new Ship(game, def, team, name, isPlayer);
+  if (def.kind === 'plane') return new Plane(game, def, team, name, isPlayer);
+  if (def.kind === 'tank') return new Tank(game, def, team, name, isPlayer);
+  return new Ship(game, def, team, name, isPlayer);
 }
