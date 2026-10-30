@@ -83,7 +83,8 @@ class Pool {
 }
 
 const C = (h) => new THREE.Color(h);
-const FIRE_A = C(0xfff3b0), FIRE_B = C(0xff7a1a), FIRE_C = C(0xc0300c), EMBER = C(0x401008);
+// Feuerfarben liegen über 1.0, damit der Bloom-Effekt sie leuchten lässt
+const FIRE_A = C(0xfff3b0).multiplyScalar(6), FIRE_B = C(0xff7a1a).multiplyScalar(3.2), FIRE_C = C(0xc0300c).multiplyScalar(1.4), EMBER = C(0xff6a20).multiplyScalar(2.2);
 const SMOKE_D = C(0x2a2826), SMOKE_G = C(0x6e6a66), SMOKE_L = C(0xa8a6a2);
 const WHITE = C(0xf4f8fb), FOAM = C(0xd9e8ef), SEA = C(0x8fb9cf);
 
@@ -96,12 +97,54 @@ export class Effects {
     this.spray = new Pool(scene, geo, new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, emissive: 0x334455 }), Math.round(3500 * scale));
     this.foam = new Pool(scene, geo, new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, emissive: 0x2a3a48 }), Math.round(2500 * scale), 0.22);
     this.density = scale;
+
+    // Kurze Lichtblitze bei Explosionen. Feste Anzahl, damit sich die Shader nicht neu kompilieren.
+    this.lights = [];
+    const nLights = quality === 'hoch' ? 3 : quality === 'mittel' ? 1 : 0;
+    for (let i = 0; i < nLights; i++) {
+      const l = new THREE.PointLight(0xffa860, 0, 100, 2);
+      scene.add(l);
+      this.lights.push({ l, t: 0, max: 1, i0: 0 });
+    }
+
+    // Druckwellen-Ringe auf dem Wasser
+    this.rings = [];
+    const ringGeo = new THREE.RingGeometry(0.8, 1, 40).rotateX(-Math.PI / 2);
+    for (let i = 0; i < 10; i++) {
+      const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+      m.visible = false;
+      scene.add(m);
+      this.rings.push({ m, t: 0, max: 1, r: 1 });
+    }
+    this.ringIdx = 0;
+  }
+
+  flash(p, size) {
+    if (!this.lights.length) return;
+    let best = this.lights[0];
+    for (const L of this.lights) if (L.t < best.t) best = L;
+    best.l.position.set(p.x, p.y + 3, p.z);
+    best.l.distance = 80 + 60 * size;
+    best.i0 = 4000 * size;
+    best.t = best.max = 0.25 + 0.12 * size;
+  }
+
+  ring(p, size, color = 0xffffff) {
+    const R = this.rings[this.ringIdx++ % this.rings.length];
+    R.m.position.set(p.x, 0.8, p.z);
+    R.m.material.color.set(color);
+    R.t = R.max = 0.9 + size * 0.15;
+    R.r = 10 + size * 14;
+    R.m.visible = true;
   }
 
   n(x) { return Math.max(1, Math.round(x * this.density)); }
 
   explosion(p, size = 1) {
     const s = size;
+    this.flash(p, s);
+    if (this.onBlast) this.onBlast(p, s);
+    if (s >= 1.5 && p.y < 12) this.ring(p, s);
     for (let i = 0; i < this.n(14 * Math.sqrt(s)); i++) {
       const v = 18 * s;
       this.fire.spawn(p.x, p.y, p.z, rand(-v, v), rand(-v * 0.5, v), rand(-v, v), rand(0.35, 0.8), rand(1.5, 3) * s, 0.2, FIRE_A, FIRE_C, 3, -4);
@@ -117,6 +160,7 @@ export class Effects {
   }
 
   splash(p, size = 1) {
+    if (size >= 2) this.ring(p, size * 0.5, 0xe8f4fa);
     for (let i = 0; i < this.n(10 * size); i++) {
       const v = 3.5 * size;
       this.spray.spawn(p.x + rand(-v, v), 0.3, p.z + rand(-v, v), rand(-v, v), rand(14, 26) * Math.sqrt(size), rand(-v, v),
@@ -158,7 +202,7 @@ export class Effects {
   }
 
   trail(p, dark = false, size = 1) {
-    this.smoke.spawn(p.x, p.y, p.z, rand(-0.5, 0.5), rand(-0.5, 0.5), rand(-0.5, 0.5), dark ? 2.5 : 1.0, 0.6 * size, (dark ? 3.5 : 1.6) * size, dark ? SMOKE_D : SMOKE_L, SMOKE_G, 0.5, -0.5);
+    this.smoke.spawn(p.x, p.y, p.z, rand(-0.5, 0.5), rand(-0.5, 0.5), rand(-0.5, 0.5), dark ? 2.5 : 1.0, 0.6 * size, (dark ? 2.6 : 1.6) * size, dark ? SMOKE_D : SMOKE_L, SMOKE_G, 0.5, -0.5);
   }
 
   wake(p, size) {
@@ -170,7 +214,25 @@ export class Effects {
     this.smoke.update(dt);
     this.spray.update(dt);
     this.foam.update(dt);
+    for (const L of this.lights) {
+      L.t = Math.max(0, L.t - dt);
+      const k = L.t / L.max;
+      L.l.intensity = L.i0 * k * k;
+    }
+    for (const R of this.rings) {
+      if (!R.m.visible) continue;
+      R.t -= dt;
+      if (R.t <= 0) { R.m.visible = false; continue; }
+      const k = 1 - R.t / R.max;
+      const e = 1 - Math.pow(1 - k, 3);
+      R.m.scale.setScalar(2 + R.r * e);
+      R.m.material.opacity = 0.55 * (1 - k);
+    }
   }
 
-  clear() { this.fire.clear(); this.smoke.clear(); this.spray.clear(); this.foam.clear(); }
+  clear() {
+    this.fire.clear(); this.smoke.clear(); this.spray.clear(); this.foam.clear();
+    for (const L of this.lights) { L.t = 0; L.l.intensity = 0; }
+    for (const R of this.rings) R.m.visible = false;
+  }
 }

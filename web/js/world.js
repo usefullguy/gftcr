@@ -131,12 +131,24 @@ export class World {
       sh.uniforms.uTime = seaTime;
       sh.uniforms.uHalf = { value: half };
       const waves = WAVES.map(([a, kx, kz, w]) => `${a.toFixed(3)}*sin(wp.x*${kx.toFixed(4)}+wp.z*${kz.toFixed(4)}+uTime*${w.toFixed(2)})`).join('+');
-      sh.vertexShader = 'uniform float uTime;\nuniform float uHalf;\n' + sh.vertexShader.replace(
+      sh.vertexShader = 'uniform float uTime;\nuniform float uHalf;\nvarying float vWaveH;\nvarying vec3 vWorld;\n' + sh.vertexShader.replace(
         '#include <begin_vertex>',
         `vec3 transformed = vec3(position);
          vec4 wp = modelMatrix * vec4(position, 1.0);
          float fade = 1.0 - smoothstep(uHalf * 0.7, uHalf, max(abs(position.x), abs(position.z)));
-         transformed.y += fade * (${waves});`
+         vWaveH = fade * (${waves});
+         transformed.y += vWaveH;
+         vWorld = wp.xyz;`
+      );
+      // Wellentäler dunkler, Kämme heller mit etwas Schaum, zum Horizont hin heller
+      sh.fragmentShader = 'varying float vWaveH;\nvarying vec3 vWorld;\n' + sh.fragmentShader.replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+         float crest = smoothstep(-1.9, 2.1, vWaveH);
+         diffuseColor.rgb = mix(diffuseColor.rgb * vec3(0.62, 0.74, 0.82), diffuseColor.rgb * vec3(1.12, 1.28, 1.25), crest);
+         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.90, 0.94), smoothstep(1.75, 2.3, vWaveH) * 0.55);
+         float far = smoothstep(600.0, 4500.0, distance(vWorld, cameraPosition));
+         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.20, 0.42, 0.56), far * 0.5);`
       );
     };
     this.sea = new THREE.Mesh(geo, mat);
@@ -144,10 +156,8 @@ export class World {
     this.sea.frustumCulled = false;
     this.scene.add(this.sea);
 
-    const far = new THREE.Mesh(
-      new THREE.PlaneGeometry(90000, 90000).rotateX(-Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x1d5a80, roughness: 0.5 })
-    );
+    // Gleiches Material wie die Wellenfläche, damit am Übergang keine Kante entsteht
+    const far = new THREE.Mesh(new THREE.PlaneGeometry(90000, 90000, 8, 8).rotateX(-Math.PI / 2), mat);
     far.position.y = -3.5;
     this.scene.add(far);
   }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { fmtTime, clamp } from './util.js';
 import { MAP_HALF } from './world.js';
 import { DEFS } from './vehicles.js';
+import { toastIn, feedIn, feedOut, killBanner, pop, flash, hpGhost, deathIn } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -76,8 +77,9 @@ export class Hud {
     if (killer) d.innerHTML = `<span class="${cls(killer)}">${esc(killer.name)}</span> → ${vName}`;
     else d.innerHTML = `${vName} ${how === 'crash' ? 'abgestürzt' : 'zerstört'}`;
     f.prepend(d);
+    feedIn(d);
     while (f.children.length > 6) f.lastChild.remove();
-    setTimeout(() => d.remove(), 9000);
+    setTimeout(() => feedOut(d), 9000);
   }
 
   toast(title, text, ms = 3200) {
@@ -85,16 +87,21 @@ export class Hud {
     t.className = 'toast';
     t.innerHTML = `<b>${title}</b>${text ? `<span>${text}</span>` : ''}`;
     $('toasts').appendChild(t);
-    setTimeout(() => t.remove(), ms);
+    toastIn(t, ms, () => t.remove());
   }
 
   hit(kill) { this.hitT = kill ? 0.5 : 0.15; this.killHit = kill; }
+
+  kill(victim, streak) {
+    const sub = `${esc(victim.name)} · ${victim.def.name}` + (streak > 1 ? ` · Serie ${streak}` : '');
+    killBanner($('killbanner'), victim.kind === 'ship' ? 'Versenkt' : 'Abgeschossen', sub);
+  }
   hurt(f) { this.hurtT = Math.min(1, this.hurtT + f * 4 + 0.15); }
 
   death(text, sub) {
     const d = $('deathmsg');
     d.hidden = !text;
-    if (text) d.innerHTML = `${text}<small>${sub || ''}</small>`;
+    if (text) { d.innerHTML = `${text}<small>${sub || ''}</small>`; deathIn(d); }
   }
 
   scoreboard(game, on) {
@@ -118,6 +125,8 @@ export class Hud {
 
     game.zones.forEach((z, i) => {
       const el = this.zoneEls[i];
+      if (el._owner !== undefined && el._owner !== z.owner) flash(el, z.owner === 0 ? 'rgba(76,141,240,0.9)' : z.owner === 1 ? 'rgba(226,86,74,0.9)' : 'rgba(255,255,255,0.7)');
+      el._owner = z.owner;
       el.className = 'zone' + (z.owner === 0 ? ' own' : z.owner === 1 ? ' enemy' : '') + (z.inside && z.inside[0] && z.inside[1] ? ' contest' : '');
       const fill = el.firstChild;
       fill.style.height = Math.abs(z.v) * 100 + '%';
@@ -126,9 +135,12 @@ export class Hud {
 
     if (p) {
       $('vpName').textContent = p.def.name;
-      $('vpStreak').textContent = p.streak > 0 ? `Serie ${p.streak}` : '';
+      const streakEl = $('vpStreak');
+      if (streakEl._v !== p.streak) { streakEl.textContent = p.streak > 0 ? `Serie ${p.streak}` : ''; if (p.streak > 0) pop(streakEl, 1.6); streakEl._v = p.streak; }
       const hpEl = $('vpHp');
+      if (this.hpUnit !== p) { this.hpUnit = p; $('vpHpGhost').style.width = '100%'; }
       hpEl.style.width = p.hpFrac * 100 + '%';
+      hpGhost($('vpHpGhost'), p.hpFrac);
       hpEl.style.background = p.hpFrac > 0.5 ? 'var(--good)' : p.hpFrac > 0.25 ? 'var(--accent)' : 'var(--red)';
       $('vpRows').innerHTML = this.rows(p, game);
     }

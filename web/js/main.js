@@ -7,6 +7,8 @@ import { DEFS, CALIBERS, PLANES, SHIPS } from './vehicles.js';
 import { buildModel } from './models.js';
 import { Hud, vehicleCardHtml, vehicleDetailsHtml, esc } from './hud.js';
 import { clamp, elevationFor, fmtTime } from './util.js';
+import { createPipeline } from './render.js';
+import { splitLogo, screenIn, cardsIn, detailsIn, countUp, resultIn, hudIn, bindUiSounds } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,12 +33,11 @@ for (const s of STREAKS) if (s.unlock) for (const id of s.unlock) UNLOCK_TEXT[id
 // ---------- Renderer ----------
 const canvas = $('game');
 const quality = settings.quality;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'niedrig', powerPreference: 'high-performance' });
+// Kantenglättung übernimmt SMAA in der Nachbearbeitung
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
 const pixelRatio = { niedrig: 0.75, mittel: 1, hoch: 1.5 }[quality] ?? 1;
 renderer.setPixelRatio(Math.min(2, Math.min(window.devicePixelRatio || 1, 2) * pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = quality !== 'niedrig';
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -46,10 +47,12 @@ camera.rotation.order = 'YXZ';
 
 window.addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
+  pipeline.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 });
 
+const pipeline = createPipeline(renderer, scene, camera, quality);
 const world = new World(scene, quality);
 const effects = new Effects(scene, quality);
 const audio = new Sound();
@@ -125,7 +128,12 @@ const view = {
 const screens = ['loading', 'menu', 'hangar', 'controls', 'settings', 'pause', 'result'];
 let controlsReturn = 'menu';
 function showScreen(name) {
-  for (const s of screens) $(s).hidden = s !== name;
+  for (const s of screens) {
+    const el = $(s);
+    const show = s === name;
+    if (show && el.hidden) { el.hidden = false; screenIn(el); }
+    else el.hidden = !show;
+  }
 }
 
 document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
@@ -183,6 +191,8 @@ function renderHangar() {
     cards.appendChild(b);
   }
   $('details').innerHTML = vehicleDetailsHtml(DEFS[selected], CALIBERS);
+  detailsIn($('details'));
+  if (cards.dataset.tab !== tab) { cards.dataset.tab = tab; cardsIn(cards); }
   updateDeployButton();
 }
 
@@ -284,12 +294,17 @@ function startGame() {
     scene, world, effects, audio, settings, unlocks,
     hooks: {
       hit: (kill) => { hud.hit(kill); audio.hit(kill); },
-      hurt: (f) => hud.hurt(f),
-      feed: (k, v, how) => hud.feed(k, v, how, game.player),
-      reward: (label, text) => hud.toast(label, text),
+      hurt: (f) => { hud.hurt(f); audio.clank(); shake(Math.min(0.6, f * 6)); },
+      feed: (k, v, how) => {
+        hud.feed(k, v, how, game.player);
+        if (k && k === game.player) hud.kill(v, k.streak);
+      },
+      recoil: (size) => shake(size * 0.35),
+      reward: (label, text) => { hud.toast(label, text); audio.uiToast(); },
       unlocked: (ids) => {
         saveUnlocks();
         hud.toast('Freigeschaltet', ids.map((id) => DEFS[id].name).join(' und '), 4500);
+        audio.uiUnlock();
       },
       playerDied: (killer) => {
         state = 'dead';
@@ -316,6 +331,7 @@ function beginControl() {
   state = 'playing';
   hud.death(null);
   hud.show(true);
+  hudIn($('hud'));
   showScreen(null);
   view.yaw = Math.atan2(-p.fwd.x, -p.fwd.z);
   view.pitch = p.kind === 'plane' ? 0 : -0.08;
@@ -364,6 +380,8 @@ function showResult(winner) {
     ['Zonen eingenommen', s.caps], ['Schaden', Math.round(s.damage)],
   ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
   showScreen('result');
+  resultIn($('result'));
+  $('resultStats').querySelectorAll('td:last-child').forEach((td, i) => countUp(td, Number(td.textContent), 0.4 + i * 0.08));
   hud.show(false);
 }
 
@@ -439,7 +457,7 @@ function updateCamera(dt) {
     _t.copy(p.pos).addScaledVector(dir, -d);
     _t.y += d * 0.2;
     view.camPos.lerp(_t, p.alive ? Math.min(1, dt * 18) : Math.min(1, dt * 3));
-    camera.position.copy(view.camPos);
+    camera.position.copy(view.camPos).add(shakeOffset(dt));
     camera.rotation.set(pitch, yaw, 0);
     view.aim.copy(dir).multiplyScalar(1500).add(camera.position);
     if (view.aim.y < 0) {
@@ -478,7 +496,7 @@ function updateCamera(dt) {
     _t.y += d * 0.18;
     _t.y = Math.max(_t.y, 4);
     view.camPos.lerp(_t, Math.min(1, dt * 12));
-    camera.position.copy(view.camPos);
+    camera.position.copy(view.camPos).add(shakeOffset(dt));
     camera.rotation.set(pitch, yaw, 0);
     const cf = dirFrom(yaw, pitch, _t);
     const range = p.cal.range;
@@ -513,6 +531,33 @@ function updateCamera(dt) {
   }
 }
 
+// ---------- Kamerawackeln & Vorbeiflug ----------
+let shakeAmt = 0;
+const _shake = new THREE.Vector3();
+function shake(a) { shakeAmt = Math.min(1.2, shakeAmt + a); }
+function shakeOffset(dt) {
+  shakeAmt = Math.max(0, shakeAmt - dt * 2.2);
+  const a = shakeAmt * shakeAmt * 2.2;
+  return _shake.set((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, (Math.random() - 0.5) * a);
+}
+effects.onBlast = (p, size) => {
+  if (state !== 'playing') return;
+  const d = camera.position.distanceTo(p);
+  if (d < 400) shake(size * 0.5 * (1 - d / 400));
+};
+
+const flybyCd = new Map();
+function flybys() {
+  for (const u of game.units) {
+    if (u.kind !== 'plane' || !u.alive || u === game.player) continue;
+    const d = u.pos.distanceTo(camera.position);
+    if (d < 90 && u.speed > 70 && (flybyCd.get(u.id) || 0) < game.time) {
+      flybyCd.set(u.id, game.time + 4);
+      audio.flyby(u.pos);
+    }
+  }
+}
+
 // ---------- Hauptschleife ----------
 let last = performance.now();
 let fpsAcc = 0;
@@ -532,9 +577,12 @@ function frame(now) {
     const p = game.player;
     updateCamera(dt);
     world.update(dt, p.pos, camera);
-    audio.setListener(camera.position);
-    if (p.alive) audio.engine(p.kind, p.kind === 'plane' ? p.ctrl.throttle : Math.abs(p.ctrl.throttle));
+    audio.setListener(camera);
+    if (p.alive) audio.engine(p.kind, p.kind === 'plane' ? p.ctrl.throttle : Math.abs(p.ctrl.throttle), p.kind === 'plane' ? p.speed / p.def.maxSpeed : 0);
     else audio.engine(null);
+    if (p.alive && p.hpFrac < 0.25) audio.alarm();
+    flybys();
+    pipeline.setHurt(hud.hurtT);
     hud.scoreboard(game, keys.has('Tab'));
     hud.update(dt, game, camera, view);
     if (state === 'dead') {
@@ -551,10 +599,20 @@ function frame(now) {
     // Standbild, aber Wasser bewegt sich weiter
     world.update(dt * 0.3, game.player.pos, camera);
   }
-  renderer.render(scene, camera);
+  pipeline.render(dt);
+}
+
+// Testzugang für automatisierte Tests: index.html?debug
+if (new URLSearchParams(location.search).has('debug')) {
+  window.__dbg = {
+    view, camera, mouse, get game() { return game; },
+    step(n, dt = 1 / 30) { for (let i = 0; i < n; i++) { controlPlayer(dt); game.update(dt); effects.update(dt); updateCamera(dt); } },
+  };
 }
 
 // Start
+splitLogo();
+bindUiSounds(audio);
 showScreen('menu');
 state = 'menu';
 setShowcase(selected);

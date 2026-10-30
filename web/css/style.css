@@ -156,3 +156,72 @@ table.stats td:last-child { text-align: right; font-weight: 700; }
   #scoreboard { min-width: 0; width: calc(100% - 32px); grid-template-columns: 1fr; }
   .menu-side { padding: 0 20px; }
 }
+
+/* ---------- Feinschliff & Animationen ---------- */
+.logo { perspective: 600px; }
+.logo .ch { display: inline-block; transform-origin: 50% 80%; will-change: transform; }
+
+button { position: relative; border-radius: 3px; transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.2s, color 0.15s; }
+button:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { box-shadow: 0 0 0 0 rgba(240, 180, 64, 0); }
+button.primary:hover:not(:disabled) { box-shadow: 0 4px 22px -4px rgba(240, 180, 64, 0.55); transform: translateY(-1px); }
+
+.menu-buttons button { overflow: hidden; }
+.menu-buttons button::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent);
+  transform: scaleY(0); transition: transform 0.2s ease-out;
+}
+.menu-buttons button:hover::before { transform: scaleY(1); }
+.menu-buttons button:not(.primary):hover { padding-left: 26px; }
+.menu-buttons button { transition: padding 0.18s ease-out, background 0.15s, border-color 0.15s, box-shadow 0.2s; }
+
+.panel {
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(22, 33, 44, 0.92), rgba(12, 19, 26, 0.92));
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.card { border-radius: 4px; transition: transform 0.18s ease-out, border-color 0.15s, background 0.15s, box-shadow 0.2s; }
+.card:hover:not(.locked) { transform: translateY(-3px); box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.8); border-color: rgba(255, 255, 255, 0.3); }
+.card.sel { box-shadow: inset 0 0 0 1px var(--accent), 0 10px 30px -16px rgba(240, 180, 64, 0.6); }
+.stat .sbar, .stat .sbar i { border-radius: 3px; }
+
+.toast {
+  border-radius: 4px; border-left-width: 3px; backdrop-filter: blur(6px);
+  background: linear-gradient(90deg, rgba(240, 180, 64, 0.16), rgba(10, 16, 22, 0.85) 40%);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.7);
+  animation: none;
+}
+
+#feed div { border-radius: 3px; border-left: 2px solid rgba(255, 255, 255, 0.25); backdrop-filter: blur(4px); }
+
+.zone { border-radius: 4px; transition: border-color 0.3s; }
+.tk .bar, .tk .bar i { border-radius: 2px; }
+.tk .bar i { transition: width 0.4s ease-out; }
+
+#vehpanel, #minimap { border-radius: 6px; backdrop-filter: blur(4px); }
+.hpbar { position: relative; border-radius: 3px; overflow: hidden; }
+.hpbar i { position: absolute; left: 0; top: 0; bottom: 0; }
+#vpHpGhost { background: rgba(255, 240, 220, 0.75); width: 100%; }
+#vpHp { transition: background 0.3s; }
+.gauge, .gauge i { border-radius: 3px; }
+
+#killbanner {
+  position: absolute; top: 58%; left: 50%; transform: translateX(-50%); text-align: center;
+  pointer-events: none; white-space: nowrap;
+}
+#killbanner b {
+  display: block; font-size: 26px; letter-spacing: 0.22em; text-transform: uppercase; color: #fff;
+  text-shadow: 0 0 18px rgba(255, 120, 80, 0.8), 0 2px 2px rgba(0, 0, 0, 0.6);
+}
+#killbanner span { display: block; margin-top: 2px; font-size: 15px; color: var(--accent); letter-spacing: 0.04em; }
+
+#warning { border-radius: 4px; animation: warnPulse 0.9s ease-in-out infinite alternate; }
+@keyframes warnPulse { from { opacity: 0.65; } to { opacity: 1; } }
+
+#scoreboard { border-radius: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before { transition: none !important; animation: none !important; }
+}

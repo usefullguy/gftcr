@@ -54,10 +54,10 @@ export class Projectiles {
     for (const m of [this.tracers, this.bombs, this.torps]) {
       m.frustumCulled = false; m.count = 0; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m);
     }
-    this.cBullet = new THREE.Color(0xffd27a);
-    this.cFlak = new THREE.Color(0xff9a5a);
-    this.cShell = new THREE.Color(0xffb347);
-    this.cRocket = new THREE.Color(0xfff0c0);
+    this.cBullet = new THREE.Color(0xffd27a).multiplyScalar(4);
+    this.cFlak = new THREE.Color(0xff9a5a).multiplyScalar(3.5);
+    this.cShell = new THREE.Color(0xffb347).multiplyScalar(5);
+    this.cRocket = new THREE.Color(0xfff0c0).multiplyScalar(6);
   }
 
   fire(type, pos, vel, owner, o) {

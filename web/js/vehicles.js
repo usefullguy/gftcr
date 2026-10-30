@@ -478,6 +478,7 @@ export class Ship extends Unit {
       game.effects.cannonBlast(muzzle, dir, cal.size * 1.6);
     }
     game.audio.shot(this.turrets[0].cal === '40' ? 'cannon' : 'big', this.pos, this.isPlayer);
+    if (this.isPlayer && game.hooks.recoil) game.hooks.recoil(cal.size);
   }
 
   updateAA(dt) {

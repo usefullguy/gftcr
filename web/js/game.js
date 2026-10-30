@@ -155,10 +155,11 @@ export class Game {
     if (attacker && attacker.team === u.team) return;
     // Schiffe sind gegen MG-Feuer gepanzert
     if (u.kind === 'ship' && type === 'bullet') amount *= u.def.id === 'schnellboot' ? 0.6 : 0.2;
+    const dealt = Math.min(amount, u.hp);
     u.hp -= amount;
     if (attacker) { u.lastAttacker = attacker; u.lastHit = this.time; }
     if (attacker && attacker.isPlayer) {
-      this.stats.damage += amount;
+      this.stats.damage += dealt;
       this.hooks.hit(u.hp <= 0);
     }
     if (u.isPlayer) this.hooks.hurt(amount / u.def.hp);

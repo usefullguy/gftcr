@@ -49,9 +49,15 @@ web/
   js/models.js      Low-Poly-Modelle aus Grundkörpern
   js/effects.js     Feuer, Rauch, Gischt
   js/hud.js         Anzeigen, Minikarte
-  js/audio.js       Klänge (zur Laufzeit erzeugt)
-  vendor/           three.js r160 (MIT)
+  js/audio.js       Klänge mit Web Audio: 3D-Raumklang, Hall, Schallverzögerung
+  js/render.js      Nachbearbeitung: Bloom, SMAA, Vignette, Farbabstimmung
+  js/ui.js          UI-Animationen
+  vendor/           three.js r160 (MIT), postprocessing 6.35 (Zlib), GSAP 3.15 (GSAP Standard License)
 ```
+
+Grafikstufe „Niedrig“ schaltet Nachbearbeitung, Schatten und Explosionslichter ab, für ältere Schul-PCs.
+
+Für automatisierte Tests gibt es `index.html?debug` (stellt `window.__dbg` bereit).
 
 ## Veröffentlichen
 

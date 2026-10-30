@@ -6,6 +6,7 @@
   <title>Sturmflut</title>
   <meta name="description" content="Luft- und Seegefechte im Browser. Flugzeuge und Schiffe, Gegner sind KI.">
   <link rel="stylesheet" href="css/style.css">
+  <script src="vendor/gsap.min.js"></script>
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.min.js" } }
   </script>
@@ -151,13 +152,14 @@
     <div id="warning" hidden></div>
     <div id="vehpanel">
       <div class="vp-name"><span id="vpName"></span><span id="vpStreak"></span></div>
-      <div class="hpbar"><i id="vpHp"></i></div>
+      <div class="hpbar"><i id="vpHpGhost"></i><i id="vpHp"></i></div>
       <div class="vp-rows" id="vpRows"></div>
     </div>
     <canvas id="minimap" width="200" height="200"></canvas>
     <div id="scoreboard" hidden></div>
     <div id="vignette"></div>
     <div id="deathmsg" hidden></div>
+    <div id="killbanner" hidden></div>
   </div>
 
   <script type="module" src="js/main.js"></script>
