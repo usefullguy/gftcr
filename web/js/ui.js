@@ -20,14 +20,15 @@ export function screenIn(el) {
     const chars = el.querySelectorAll('.logo .ch');
     gsap.fromTo(chars, { y: 28, opacity: 0, rotateX: -70 }, { y: 0, opacity: 1, rotateX: 0, duration: 0.7, stagger: 0.045, ease: 'back.out(1.6)' });
     gsap.fromTo(el.querySelector('.tagline'), { opacity: 0, letterSpacing: '0.6em' }, { opacity: 1, letterSpacing: '0.3em', duration: 0.9, delay: 0.25, ease: 'power3.out' });
-    gsap.fromTo(el.querySelectorAll('.menu-buttons button'), { x: -30, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, stagger: 0.07, delay: 0.35, ease: 'power3.out' });
-    gsap.fromTo(el.querySelector('.menu-side > p'), { opacity: 0 }, { opacity: 1, duration: 0.6, delay: 0.7 });
+    gsap.fromTo(el.querySelectorAll('.menu-nav > .nav, .nav-row'), { x: -40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, stagger: 0.07, delay: 0.3, ease: 'power3.out' });
+    gsap.fromTo(el.querySelector('.topbar'), { y: -30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: 'power3.out' });
+    gsap.fromTo(el.querySelector('.report'), { x: 40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, delay: 0.5, ease: 'power3.out' });
     return;
   }
   const panel = el.querySelector('.panel');
   if (!panel) return;
   gsap.fromTo(panel, { y: 24, opacity: 0, scale: 0.985 }, { y: 0, opacity: 1, scale: 1, duration: 0.42, ease: 'power3.out' });
-  const items = panel.querySelectorAll('h2, h3, .row, table, .tabs, .row-buttons, .panel.center > button, .hangar-foot');
+  const items = panel.querySelectorAll('.kicker, h2, h3, .row, table, .tabs, .row-buttons, .panel.center > button, .hangar-foot, .team, .code-box, .code-input, .radar');
   gsap.fromTo(items, { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, stagger: 0.025, delay: 0.08, ease: 'power2.out' });
 }
 
@@ -109,7 +110,7 @@ export function deathIn(el) {
 
 export function hudIn(el) {
   if (!on) return;
-  gsap.fromTo(el.querySelectorAll('#topbar, #vehpanel, #minimap'), { opacity: 0, y: (i) => (i === 0 ? -16 : 16) }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.06, ease: 'power3.out' });
+  gsap.fromTo(el.querySelectorAll('#topbar-hud, #vehpanel, #weaponpanel, #minimap'), { opacity: 0, y: (i) => (i === 0 ? -16 : 16) }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.06, ease: 'power3.out' });
 }
 
 // Klick- und Hover-Klänge für alle Buttons
@@ -123,5 +124,66 @@ export function bindUiSounds(audio) {
   document.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (b && !b.disabled) { audio.init(); audio.uiClick(); }
+  });
+}
+
+// ---------- Tarnmuster-Übergang ----------
+// Splittertarn: kantige Splitter in drei Farbtönen auf Grundfarbe, dazu feine "Regenstriche".
+export function makeCamo(w = 1280, h = 800) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7a7650';
+  g.fillRect(0, 0, w, h);
+  const colors = ['#3f4a2c', '#5a4a33', '#2f3824', '#6b6a44'];
+  const shard = (cx, cy, size, ang) => {
+    g.beginPath();
+    const n = 4 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < n; i++) {
+      const a = ang + (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+      // gestreckt entlang der Hauptrichtung
+      const r = size * (0.4 + Math.random() * 0.9) * (Math.abs(Math.cos(a - ang)) * 1.4 + 0.35);
+      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r * 0.75;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.closePath();
+    g.fill();
+  };
+  for (let layer = 0; layer < colors.length; layer++) {
+    g.fillStyle = colors[layer];
+    const count = 26 - layer * 3;
+    for (let i = 0; i < count; i++) shard(Math.random() * w, Math.random() * h, 60 + Math.random() * 120, -0.5 + (Math.random() - 0.5) * 0.4);
+  }
+  // Regenstriche
+  g.strokeStyle = 'rgba(30, 36, 20, 0.55)';
+  g.lineWidth = 2;
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * w, y = Math.random() * h, l = 6 + Math.random() * 10;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + l * 0.25, y + l); g.stroke();
+  }
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+let camoBusy = false;
+export function camoTransition(swap, label = '') {
+  const el = document.getElementById('camo');
+  if (!el.style.backgroundImage) el.style.backgroundImage = `url(${makeCamo()})`;
+  document.getElementById('camoText').textContent = label;
+  if (!on || camoBusy) { swap(); return Promise.resolve(); }
+  camoBusy = true;
+  const closed = 'polygon(0% 0%, 0% 0%, -20% 100%, -20% 100%)';
+  const full = 'polygon(0% 0%, 120% 0%, 100% 100%, -20% 100%)';
+  const gone = 'polygon(120% 0%, 120% 0%, 100% 100%, 100% 100%)';
+  const lbl = el.querySelector('.camo-label');
+  return new Promise((resolve) => {
+    gsap.timeline({ onComplete: () => { gsap.set(el, { visibility: 'hidden', clipPath: closed }); camoBusy = false; resolve(); } })
+      .set(el, { visibility: 'visible', clipPath: closed })
+      .set(lbl, { opacity: 0, scale: 0.9 })
+      .to(el, { clipPath: full, duration: 0.42, ease: 'power3.in' })
+      .to(lbl, { opacity: 1, scale: 1, duration: 0.2, ease: 'back.out(2)' }, '-=0.05')
+      .add(() => swap())
+      .to({}, { duration: 0.35 })
+      .to(lbl, { opacity: 0, duration: 0.15 })
+      .to(el, { clipPath: gone, duration: 0.45, ease: 'power3.out' });
   });
 }

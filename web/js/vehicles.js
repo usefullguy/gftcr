@@ -203,8 +203,6 @@ export class Plane extends Unit {
     q.normalize();
     this.root.updateMatrixWorld(true);
 
-    for (const p of this.props) p.rotation.z += dt * (20 + 40 * c.throttle);
-
     const r = Math.hypot(this.pos.x, this.pos.z);
     this.bounds = r > MAP_HALF - 300;
     // Außerhalb des Gebiets nimmt das Flugzeug Schaden
@@ -216,15 +214,18 @@ export class Plane extends Unit {
     const ground = game.world.groundAt(this.pos.x, this.pos.z);
     if (this.pos.y < ground + 1.5) {
       if (this.alive) game.kill(this, game.recentAttacker(this), 'crash');
-      if (ground <= 0.5) game.effects.splash(this.pos, 3.5);
-      game.effects.explosion(this.pos, 2.2);
-      game.audio.boom(1.5, this.pos);
+      game.blast(this.pos, 2.2, ground <= 0.5 ? 3.5 : 0, 1.5);
       this.removed = true;
       this.root.visible = false;
       return;
     }
+    this.fx(dt);
+  }
 
-    // Brand und Rauch
+  // Nur Darstellung: Propeller, Brand, Rauch. Läuft auch auf Clients im Mehrspieler.
+  fx(dt) {
+    const game = this.game, fwd = this.fwd;
+    for (const p of this.props) p.rotation.z += dt * (20 + 40 * (this.alive ? this.ctrl.throttle : 0.2));
     const f = this.hpFrac;
     if (!this.alive || f < 0.5) {
       this.burnAcc += dt * (this.alive ? (f < 0.25 ? 30 : 14) : 40);
@@ -397,8 +398,13 @@ export class Ship extends Unit {
       this.updateAA(dt);
       this.updateTorpedoes(dt);
     }
+    this.fx(dt);
+  }
 
-    // Kielwasser
+  // Nur Darstellung: Kielwasser und Brand. Läuft auch auf Clients im Mehrspieler.
+  fx(dt) {
+    const def = this.def, game = this.game;
+    const fx = this.fwd.x, fz = this.fwd.z;
     const sp = Math.abs(this.speed);
     this.wakeAcc += dt * sp * 0.35 * game.effects.density;
     while (this.wakeAcc > 1) {

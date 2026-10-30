@@ -4,9 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sturmflut</title>
-  <meta name="description" content="Luft- und Seegefechte im Browser. Flugzeuge und Schiffe, Gegner sind KI.">
+  <meta name="description" content="Luft- und Seegefechte im Browser. Allein gegen KI oder mit Freunden über Raumcode.">
+  <link rel="preload" href="fonts/black-ops-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/rajdhani-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
   <script src="vendor/gsap.min.js"></script>
+  <script src="vendor/peerjs.min.js"></script>
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.min.js" } }
   </script>
@@ -14,6 +17,7 @@
 <body>
   <canvas id="game"></canvas>
   <canvas id="overlay"></canvas>
+  <div id="fxlayer"></div>
 
   <div id="loading" class="screen">
     <div class="logo">STURMFLUT</div>
@@ -22,23 +26,47 @@
 
   <!-- Hauptmenü -->
   <div id="menu" class="screen" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark"></span>STURMFLUT</div>
+      <div class="profile">
+        <span class="rank" id="profRank">Rekrut</span>
+        <b id="profName">Spieler</b>
+        <span class="muted" id="profUnlocks"></span>
+      </div>
+    </header>
     <div class="menu-side">
       <div class="logo">STURMFLUT</div>
       <p class="tagline">Luft- und Seegefechte</p>
-      <nav class="menu-buttons">
-        <button data-go="hangar" class="primary">Gefecht</button>
-        <button data-go="controls">Steuerung</button>
-        <button data-go="settings">Einstellungen</button>
+      <nav class="menu-nav">
+        <button data-go="random" class="nav primary"><i>01</i><span>Schnelles Gefecht<small>Online mit zufälligen Spielern</small></span></button>
+        <button data-go="host" class="nav"><i>02</i><span>Raum erstellen<small>Code an Freunde schicken</small></span></button>
+        <button data-go="join" class="nav"><i>03</i><span>Raum beitreten<small>Mit Code</small></span></button>
+        <button data-go="training" class="nav"><i>04</i><span>Training<small>Allein gegen KI</small></span></button>
+        <div class="nav-row">
+          <button data-go="controls" class="nav small">Steuerung</button>
+          <button data-go="settings" class="nav small">Einstellungen</button>
+        </div>
       </nav>
-      <p class="muted small">7 gegen 7. Erobert die Zonen A, B und C mit Schiffen, holt den Gegner aus der Luft. Wer zuerst keine Punkte mehr hat, verliert.</p>
     </div>
+    <aside class="report" id="report">
+      <h4>Dienstakte</h4>
+      <div class="report-grid">
+        <div><b id="carMatches">0</b><span>Gefechte</span></div>
+        <div><b id="carWins">0</b><span>Siege</span></div>
+        <div><b id="carKills">0</b><span>Abschüsse</span></div>
+        <div><b id="carStreak">0</b><span>Beste Serie</span></div>
+      </div>
+    </aside>
   </div>
 
   <!-- Fahrzeugwahl, auch beim Wiedereinstieg -->
   <div id="hangar" class="screen" hidden>
     <div class="panel hangar-panel">
       <header class="hangar-head">
-        <h2 id="hangarTitle">Fahrzeug wählen</h2>
+        <div>
+          <span class="kicker" id="hangarKicker">Training</span>
+          <h2 id="hangarTitle">Fahrzeug wählen</h2>
+        </div>
         <div class="tabs">
           <button data-tab="plane" class="tab active">Flugzeuge</button>
           <button data-tab="ship" class="tab">Schiffe</button>
@@ -49,13 +77,82 @@
       <footer class="hangar-foot">
         <button id="hangarBack">Zurück</button>
         <span id="respawnTimer" class="muted"></span>
-        <button id="deploy" class="primary">Ins Gefecht</button>
+        <button id="deploy" class="primary big">Ins Gefecht</button>
       </footer>
     </div>
   </div>
 
-  <div id="controls" class="screen" hidden>
+  <!-- Raum beitreten -->
+  <div id="join" class="screen dim" hidden>
     <div class="panel narrow">
+      <span class="kicker">Mehrspieler</span>
+      <h2>Raum beitreten</h2>
+      <p class="muted">Gib den Code ein, den der Host dir geschickt hat.</p>
+      <input id="joinCode" class="code-input" maxlength="5" autocomplete="off" spellcheck="false" placeholder="ABCDE">
+      <p class="error" id="joinError" hidden></p>
+      <div class="row-buttons">
+        <button data-go="menu">Zurück</button>
+        <button id="joinGo" class="primary">Beitreten</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verbindung wird aufgebaut -->
+  <div id="connecting" class="screen dim" hidden>
+    <div class="panel narrow center">
+      <span class="kicker">Mehrspieler</span>
+      <h2 id="connTitle">Verbinde …</h2>
+      <div class="radar"><i></i></div>
+      <p class="muted" id="connText"></p>
+      <button data-go="menu">Abbrechen</button>
+    </div>
+  </div>
+
+  <!-- Lobby -->
+  <div id="lobby" class="screen dim" hidden>
+    <div class="panel lobby-panel">
+      <header class="lobby-head">
+        <div>
+          <span class="kicker" id="lobbyKicker">Raum</span>
+          <h2>Bereitschaftsraum</h2>
+        </div>
+        <div class="code-box">
+          <span>Raumcode</span>
+          <b id="lobbyCode">-----</b>
+          <button id="copyCode" class="small">Kopieren</button>
+        </div>
+      </header>
+      <div class="lobby-teams">
+        <div class="team team-blue"><h4>Blau</h4><ul id="teamBlue"></ul></div>
+        <div class="team team-red"><h4>Rot</h4><ul id="teamRed"></ul></div>
+      </div>
+      <div class="lobby-opts" id="lobbyOpts">
+        <label class="row">Modus
+          <select id="optMode">
+            <option value="coop">Zusammen gegen KI</option>
+            <option value="versus">Gegeneinander (Lücken mit KI)</option>
+          </select>
+        </label>
+        <label class="row">KI-Stärke
+          <select id="optDiff">
+            <option value="leicht">Leicht</option>
+            <option value="normal">Normal</option>
+            <option value="schwer">Schwer</option>
+          </select>
+        </label>
+      </div>
+      <p class="muted small" id="lobbyNote"></p>
+      <footer class="row-buttons">
+        <button id="lobbyLeave">Verlassen</button>
+        <button id="lobbyTeam">Team wechseln</button>
+        <button id="lobbyStart" class="primary big">Gefecht starten</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="controls" class="screen dim" hidden>
+    <div class="panel narrow">
+      <span class="kicker">Handbuch</span>
       <h2>Steuerung</h2>
       <h3>Flugzeug</h3>
       <table class="keys">
@@ -85,15 +182,16 @@
       <h3>Serien</h3>
       <p class="muted small">Abschüsse ohne selbst abgeschossen zu werden:<br>
         2 – Feldreparatur · 3 – Habicht und Zerstörer frei · 4 – Begleitschutz · 5 – Bussard und Kreuzer frei · 7 – Sperrfeuer</p>
-      <button data-go="menu">Zurück</button>
+      <button data-go="back">Zurück</button>
     </div>
   </div>
 
-  <div id="settings" class="screen" hidden>
+  <div id="settings" class="screen dim" hidden>
     <div class="panel narrow">
+      <span class="kicker">System</span>
       <h2>Einstellungen</h2>
       <label class="row">Name <input id="setName" maxlength="16"></label>
-      <label class="row">KI-Stärke
+      <label class="row">KI-Stärke (Training)
         <select id="setDifficulty">
           <option value="leicht">Leicht</option>
           <option value="normal">Normal</option>
@@ -120,8 +218,9 @@
 
   <div id="pause" class="screen dim" hidden>
     <div class="panel narrow center">
+      <span class="kicker" id="pauseKicker">Gefecht läuft weiter</span>
       <h2>Pause</h2>
-      <button id="resume" class="primary">Weiter</button>
+      <button id="resume" class="primary big">Weiter</button>
       <button data-go="controls-ingame">Steuerung</button>
       <button id="quit">Gefecht verlassen</button>
     </div>
@@ -129,6 +228,7 @@
 
   <div id="result" class="screen dim" hidden>
     <div class="panel narrow center">
+      <span class="kicker">Gefechtsbericht</span>
       <h2 id="resultTitle">Sieg</h2>
       <p id="resultSub" class="muted"></p>
       <table class="stats" id="resultStats"></table>
@@ -141,18 +241,25 @@
 
   <!-- HUD -->
   <div id="hud" hidden>
-    <div id="topbar">
-      <div class="tk tk-blue"><b id="tkBlue">800</b><div class="bar"><i id="tkBlueBar"></i></div></div>
-      <div id="zones"></div>
-      <div class="tk tk-red"><div class="bar"><i id="tkRedBar"></i></div><b id="tkRed">800</b></div>
+    <div id="topbar-hud">
+      <div class="tk tk-blue"><span class="tk-label">Blau</span><b id="tkBlue">800</b><div class="bar"><i id="tkBlueBar"></i></div></div>
+      <div class="hud-center">
+        <div id="zones"></div>
+        <div id="timer">15:00</div>
+      </div>
+      <div class="tk tk-red"><div class="bar"><i id="tkRedBar"></i></div><b id="tkRed">800</b><span class="tk-label">Rot</span></div>
     </div>
-    <div id="timer">15:00</div>
     <div id="feed"></div>
     <div id="toasts"></div>
     <div id="warning" hidden></div>
+    <div id="netinfo" hidden></div>
     <div id="vehpanel">
-      <div class="vp-name"><span id="vpName"></span><span id="vpStreak"></span></div>
-      <div class="hpbar"><i id="vpHpGhost"></i><i id="vpHp"></i></div>
+      <div class="vp-head"><span class="vp-class" id="vpClass"></span><span id="vpStreak"></span></div>
+      <div class="vp-name" id="vpName"></div>
+      <div class="hpbar"><i id="vpHpGhost"></i><i id="vpHp"></i><span class="hp-seg"></span></div>
+    </div>
+    <div id="weaponpanel">
+      <div class="wp-big"><b id="wpBig">0</b><span id="wpBigUnit"></span></div>
       <div class="vp-rows" id="vpRows"></div>
     </div>
     <canvas id="minimap" width="200" height="200"></canvas>
@@ -160,6 +267,12 @@
     <div id="vignette"></div>
     <div id="deathmsg" hidden></div>
     <div id="killbanner" hidden></div>
+  </div>
+
+  <!-- Tarnmuster-Übergang -->
+  <div id="camo" aria-hidden="true">
+    <div class="camo-edge"></div>
+    <div class="camo-label"><b>STURMFLUT</b><span id="camoText"></span></div>
   </div>
 
   <script type="module" src="js/main.js"></script>

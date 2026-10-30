@@ -1,11 +1,19 @@
 # Sturmflut
 
-Luft- und Seegefechte im Browser. Blau gegen Rot, 7 gegen 7, die Gegner und Mitspieler sind KI.
+Luft- und Seegefechte im Browser. Blau gegen Rot, 7 gegen 7. Allein gegen KI oder mit anderen online.
 
 - **Flugzeuge:** Falke (Jäger), Habicht (zweimotorig, Raketen), Bussard (Bomber)
 - **Schiffe:** Schnellboot (Torpedos), Zerstörer, Kreuzer
 - **Modus:** Drei Zonen (A, B, C) werden von Schiffen eingenommen. Wer mehr Zonen hält, zieht dem Gegner Punkte ab. Abschüsse kosten ebenfalls Punkte. Wer zuerst bei 0 ist oder nach 15 Minuten weniger Punkte hat, verliert.
 - **Serien:** Abschüsse ohne selbst abgeschossen zu werden schalten Fahrzeuge frei und geben Belohnungen (Reparatur, Begleitschutz, Sperrfeuer). Freischaltungen werden im Browser gespeichert.
+
+## Mehrspieler
+
+- **Schnelles Gefecht:** tritt einem offenen Raum bei oder eröffnet selbst einen, Spieler gegeneinander, Lücken füllt die KI.
+- **Raum erstellen:** zeigt einen Code mit 5 Zeichen. „Kopieren“ legt einen Einladungslink (`?raum=CODE`) in die Zwischenablage. Modus „Zusammen gegen KI“ oder „Gegeneinander“.
+- **Raum beitreten:** Code eingeben. Wer später kommt, steigt direkt ins laufende Gefecht ein.
+
+Technik: WebRTC über [PeerJS](https://peerjs.com). Der Host rechnet das Spiel, die anderen schicken ihre Eingaben und bekommen 15-mal pro Sekunde den Spielstand. Zum Verbindungsaufbau wird der kostenlose öffentliche PeerJS-Server benutzt, danach laufen die Daten direkt zwischen den Browsern. In sehr strengen Netzwerken (manche Schul- oder Firmennetze) kann WebRTC blockiert sein. Ein eigener Server lässt sich mit `?peer=host:port` angeben.
 
 ## Spielen
 
@@ -51,8 +59,10 @@ web/
   js/hud.js         Anzeigen, Minikarte
   js/audio.js       Klänge mit Web Audio: 3D-Raumklang, Hall, Schallverzögerung
   js/render.js      Nachbearbeitung: Bloom, SMAA, Vignette, Farbabstimmung
-  js/ui.js          UI-Animationen
-  vendor/           three.js r160 (MIT), postprocessing 6.35 (Zlib), GSAP 3.15 (GSAP Standard License)
+  js/ui.js          UI-Animationen, Tarnmuster-Übergang
+  js/net.js         Mehrspieler: Host, Client, Spiegelbild beim Client
+  vendor/           three.js r160 (MIT), postprocessing 6.35 (Zlib), GSAP 3.15 (GSAP Standard License), PeerJS 1.5 (MIT)
+  fonts/            Black Ops One, Rajdhani (SIL Open Font License)
 ```
 
 Grafikstufe „Niedrig“ schaltet Nachbearbeitung, Schatten und Explosionslichter ab, für ältere Schul-PCs.

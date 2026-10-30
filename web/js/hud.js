@@ -16,6 +16,7 @@ export class Hud {
     this.mini = $('minimap').getContext('2d');
     this.hitT = 0; this.killHit = false;
     this.hurtT = 0;
+    this.dmgDirs = [];
     this.miniBg = null;
     this.zoneEls = [];
     this.resize();
@@ -74,7 +75,8 @@ export class Hud {
     const d = document.createElement('div');
     const cls = (u) => (u === player ? 'me' : u.team === 0 ? 'b' : 'r');
     const vName = `<span class="${cls(victim)}">${esc(victim.name)}</span> <span class="muted">(${victim.def.name})</span>`;
-    if (killer) d.innerHTML = `<span class="${cls(killer)}">${esc(killer.name)}</span> → ${vName}`;
+    const ico = victim.kind === 'ship' ? '⚓' : '✈';
+    if (killer) d.innerHTML = `<span class="${cls(killer)}">${esc(killer.name)}</span><span class="ico">${ico}</span>${vName}`;
     else d.innerHTML = `${vName} ${how === 'crash' ? 'abgestürzt' : 'zerstört'}`;
     f.prepend(d);
     feedIn(d);
@@ -96,7 +98,21 @@ export class Hud {
     const sub = `${esc(victim.name)} · ${victim.def.name}` + (streak > 1 ? ` · Serie ${streak}` : '');
     killBanner($('killbanner'), victim.kind === 'ship' ? 'Versenkt' : 'Abgeschossen', sub);
   }
-  hurt(f) { this.hurtT = Math.min(1, this.hurtT + f * 4 + 0.15); }
+  hurt(f, from) {
+    this.hurtT = Math.min(1, this.hurtT + f * 4 + 0.15);
+    if (from) this.dmgDirs.push({ x: from.x, z: from.z, t: 1.4 });
+    if (this.dmgDirs.length > 6) this.dmgDirs.shift();
+  }
+
+  notice(text) {
+    const f = $('feed');
+    const d = document.createElement('div');
+    d.className = 'muted';
+    d.textContent = text;
+    f.prepend(d);
+    feedIn(d);
+    setTimeout(() => feedOut(d), 7000);
+  }
 
   death(text, sub) {
     const d = $('deathmsg');
@@ -111,7 +127,7 @@ export class Hud {
     const rows = (team) => game.units
       .filter((u) => u.team === team && !u.escort)
       .sort((a, b) => b.kills - a.kills)
-      .map((u) => `<tr class="${u.isPlayer ? 'me' : ''} ${u.alive ? '' : 'dead'}"><td>${esc(u.name)}</td><td class="muted">${u.def.name}</td><td>${u.kills}</td></tr>`).join('');
+      .map((u) => `<tr class="${u.isPlayer ? 'me' : ''} ${u.alive ? '' : 'dead'} ${u.human || u.owner ? 'human' : ''}"><td>${esc(u.name)}</td><td class="muted">${u.def.name}</td><td>${u.kills}</td></tr>`).join('');
     sb.innerHTML = `<div><h4 style="color:#8fb8ff">Blau</h4><table>${rows(0)}</table></div><div><h4 style="color:#ff9b91">Rot</h4><table>${rows(1)}</table></div>`;
   }
 
@@ -135,6 +151,9 @@ export class Hud {
 
     if (p) {
       $('vpName').textContent = p.def.name;
+      $('vpClass').textContent = p.def.klasse;
+      if (p.kind === 'plane') { $('wpBig').textContent = Math.round(p.speed * 3.6); $('wpBigUnit').textContent = 'km/h'; }
+      else { $('wpBig').textContent = Math.round(Math.abs(p.speed) * 1.94); $('wpBigUnit').textContent = 'kn'; }
       const streakEl = $('vpStreak');
       if (streakEl._v !== p.streak) { streakEl.textContent = p.streak > 0 ? `Serie ${p.streak}` : ''; if (p.streak > 0) pop(streakEl, 1.6); streakEl._v = p.streak; }
       const hpEl = $('vpHp');
@@ -154,6 +173,8 @@ export class Hud {
 
     this.hitT = Math.max(0, this.hitT - dt);
     this.hurtT = Math.max(0, this.hurtT - dt * 1.2);
+    for (const d of this.dmgDirs) d.t -= dt;
+    this.dmgDirs = this.dmgDirs.filter((d) => d.t > 0);
     $('vignette').style.opacity = this.hurtT;
 
     this.drawOverlay(game, cam, view);
@@ -164,7 +185,6 @@ export class Hud {
     const gauge = (f, cls = '') => `<span class="gauge"><i style="width:${clamp(f, 0, 1) * 100}%;${cls}"></i></span>`;
     const out = [];
     if (p.kind === 'plane') {
-      out.push(['Tempo', `${Math.round(p.speed * 3.6)} km/h`]);
       out.push(['Höhe', `${Math.round(p.pos.y)} m`]);
       out.push(['Schub', gauge(p.ctrl.throttle)]);
       out.push(['Waffen', p.overheated ? '<span class="warn">überhitzt</span>' : gauge(p.heat, p.heat > 0.7 ? 'background:var(--red)' : '')]);
@@ -172,7 +192,6 @@ export class Hud {
       if (s) out.push([s.name, `${p.ammo2} / ${s.count}` + (p.ammo2 < s.count ? ` <span class="muted">(${Math.ceil(s.rearm - p.rearm)} s)</span>` : '')]);
     } else {
       const steps = ['Zurück', 'Stopp', '1/4', '1/2', '3/4', 'Voll'];
-      out.push(['Tempo', `${Math.round(p.speed * 1.94)} kn`]);
       out.push(['Fahrstufe', steps[(p.throttleStep ?? 2) + 1]]);
       const ready = p.turrets.filter((t) => t.reload <= 0).length;
       const maxRel = Math.max(...p.turrets.map((t) => t.reload));
@@ -197,6 +216,8 @@ export class Hud {
     const W = this.overlay.width, H = this.overlay.height;
     ctx.clearRect(0, 0, W, H);
     const p = game.player;
+    const myTeam = game.myTeam ?? 0;
+    this.drawCompass(ctx, cam, game, W, dpr);
     ctx.lineWidth = 1.5 * dpr;
     ctx.font = `${12 * dpr}px Bahnschrift, Arial Narrow, sans-serif`;
     ctx.textAlign = 'center';
@@ -209,7 +230,7 @@ export class Hud {
       const s = this.project(top, cam);
       if (!s) continue;
       const dist = cam.position.distanceTo(u.pos);
-      const enemy = u.team !== 0;
+      const enemy = u.team !== myTeam;
       if (!enemy && dist > 3500) continue;
       ctx.fillStyle = ctx.strokeStyle = enemy ? 'rgba(255,110,95,0.95)' : 'rgba(120,170,255,0.9)';
       const sz = 6 * dpr;
@@ -240,6 +261,19 @@ export class Hud {
     ctx.font = `${12 * dpr}px Bahnschrift, Arial Narrow, sans-serif`;
 
     if (!p || !p.alive) return;
+
+    // Trefferrichtung: roter Bogen in Richtung des Angreifers
+    const camYaw = cam.rotation.y;
+    for (const d of this.dmgDirs) {
+      const bearing = Math.atan2(-(d.x - cam.position.x), -(d.z - cam.position.z));
+      const rel = bearing - camYaw;
+      const a = -Math.PI / 2 - rel;
+      const r = Math.min(W, H) * 0.16;
+      ctx.strokeStyle = `rgba(255,60,40,${Math.min(1, d.t) * 0.9})`;
+      ctx.lineWidth = 6 * dpr;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, r, a - 0.28, a + 0.28); ctx.stroke();
+    }
+    ctx.lineWidth = 1.5 * dpr;
 
     // Fadenkreuz
     const cx = W / 2, cy = H / 2;
@@ -303,6 +337,58 @@ export class Hud {
     }
   }
 
+  // Kompassband oben: Himmelsrichtungen, Grad, Zonen
+  drawCompass(ctx, cam, game, W, dpr) {
+    const heading = ((-cam.rotation.y * 180 / Math.PI) % 360 + 360) % 360;
+    const w = Math.min(560 * dpr, W * 0.5), x0 = W / 2 - w / 2, y = 14 * dpr, span = 120;
+    const px = (deg) => {
+      let d = deg - heading;
+      d = ((d + 540) % 360) - 180;
+      return Math.abs(d) > span / 2 ? null : W / 2 + (d / span) * w;
+    };
+    const grad = ctx.createLinearGradient(x0, 0, x0 + w, 0);
+    grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(0.15, 'rgba(0,0,0,0.45)');
+    grad.addColorStop(0.85, 'rgba(0,0,0,0.45)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x0, y - 6 * dpr, w, 28 * dpr);
+    ctx.textAlign = 'center';
+    const names = { 0: 'N', 45: 'NO', 90: 'O', 135: 'SO', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+    for (let deg = 0; deg < 360; deg += 5) {
+      const x = px(deg);
+      if (x === null) continue;
+      const fade = 1 - Math.abs(x - W / 2) / (w / 2);
+      ctx.globalAlpha = Math.max(0, fade) * 0.95;
+      ctx.strokeStyle = ctx.fillStyle = '#e8eadf';
+      ctx.lineWidth = 1 * dpr;
+      const major = deg % 15 === 0;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + (major ? 7 : 4) * dpr); ctx.stroke();
+      if (names[deg] !== undefined) {
+        ctx.font = `700 ${14 * dpr}px Rajdhani, sans-serif`;
+        ctx.fillStyle = deg === 0 ? '#f2b33d' : '#e8eadf';
+        ctx.fillText(names[deg], x, y + 21 * dpr);
+      } else if (major) {
+        ctx.font = `600 ${10 * dpr}px Rajdhani, sans-serif`;
+        ctx.fillText(String(deg), x, y + 19 * dpr);
+      }
+    }
+    // Zonen als Marker auf dem Band
+    for (const z of game.zones) {
+      const deg = ((Math.atan2(z.x - cam.position.x, -(z.z - cam.position.z)) * 180 / Math.PI) + 360) % 360;
+      const x = px(deg);
+      if (x === null) continue;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = z.owner === (game.myTeam ?? 0) ? '#7fb0ff' : z.owner >= 0 ? '#ff7d70' : '#dddddd';
+      ctx.font = `${11 * dpr}px "Black Ops One", sans-serif`;
+      ctx.fillText(z.name, x, y - 9 * dpr + 6 * dpr);
+    }
+    ctx.globalAlpha = 1;
+    // Mittelmarke
+    ctx.fillStyle = '#f2b33d';
+    ctx.beginPath(); ctx.moveTo(W / 2, y + 26 * dpr); ctx.lineTo(W / 2 - 5 * dpr, y + 32 * dpr); ctx.lineTo(W / 2 + 5 * dpr, y + 32 * dpr); ctx.fill();
+    ctx.font = `700 ${12 * dpr}px Rajdhani, sans-serif`;
+    ctx.fillText(String(Math.round(heading)).padStart(3, '0'), W / 2, y + 44 * dpr);
+  }
+
   drawMinimap(game, cam) {
     const g = this.mini, S = 200;
     g.clearRect(0, 0, S, S);
@@ -321,7 +407,7 @@ export class Hud {
       const x = tx(u.pos.x), y = tx(u.pos.z);
       const a = Math.atan2(u.fwd.x, -u.fwd.z);
       g.save(); g.translate(x, y); g.rotate(a);
-      g.fillStyle = u.isPlayer ? '#f0b440' : u.team === 0 ? '#7fb0ff' : '#ff7d70';
+      g.fillStyle = u.isPlayer ? '#f2b33d' : u.team === (game.myTeam ?? 0) ? '#7fb0ff' : '#ff7d70';
       const s = u.isPlayer ? 5 : u.kind === 'ship' ? 4 : 3;
       if (u.kind === 'ship') g.fillRect(-s * 0.5, -s * 1.3, s, s * 2.6);
       else { g.beginPath(); g.moveTo(0, -s * 1.4); g.lineTo(s, s); g.lineTo(-s, s); g.closePath(); g.fill(); }

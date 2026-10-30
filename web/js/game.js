@@ -10,6 +10,7 @@ const NAMES = ['Krause', 'Wagner', 'Becker', 'Schulz', 'Hoffmann', 'Koch', 'Rich
 
 export const SKILL = { leicht: 0.35, normal: 0.6, schwer: 0.85 };
 export const TEAM_NAMES = ['Blau', 'Rot'];
+export const PER_TEAM = 7;
 
 // Serien-Belohnungen
 export const STREAKS = [
@@ -20,6 +21,38 @@ export const STREAKS = [
   { n: 7, id: 'barrage', label: 'Sperrfeuer', text: 'F drücken: Artillerie auf das Ziel' },
 ];
 
+const newStats = () => ({ kills: 0, deaths: 0, caps: 0, bestStreak: 0, damage: 0 });
+
+// Steuert eine Einheit nach den Eingaben eines Mitspielers (nur beim Host).
+class RemoteCtrl {
+  constructor(unit) {
+    this.u = unit;
+    this.input = null;
+    this.dir = new THREE.Vector3(0, 0, -1);
+    this.aim = new THREE.Vector3();
+    this.torpSeq = 0;
+  }
+
+  update() {
+    const u = this.u, i = this.input, c = u.ctrl;
+    if (!i) return;
+    if (u.kind === 'plane') {
+      if (i.a) { this.dir.fromArray(i.a); u.steer(this.dir); }
+      if (i.r) c.roll = i.r;
+      c.throttle = clamp(i.th ?? 1, 0, 1);
+      c.fire = !!i.f1;
+      c.fire2 = !!i.f2;
+    } else {
+      c.throttle = clamp(i.th ?? 0.5, -0.25, 1);
+      u.throttleStep = i.st;
+      c.rudder = clamp(i.ru || 0, -1, 1);
+      c.aimPoint = i.ap ? this.aim.fromArray(i.ap) : null;
+      c.fire = !!i.f1;
+      if (i.tq !== undefined && i.tq !== this.torpSeq) { this.torpSeq = i.tq; c.torp = true; }
+    }
+  }
+}
+
 export class Game {
   constructor({ scene, world, effects, audio, settings, unlocks, hooks }) {
     this.scene = scene;
@@ -27,7 +60,6 @@ export class Game {
     this.effects = effects;
     this.audio = audio;
     this.settings = settings;
-    this.unlocks = unlocks;
     this.hooks = hooks;
     this.skill = SKILL[settings.difficulty] ?? 0.6;
     this.projectiles = new Projectiles(scene);
@@ -43,13 +75,23 @@ export class Game {
     ];
     this.respawnQueue = [];
     this.barrages = [];
-    this.player = null;
     this.over = false;
     this.winner = -1;
-    this.stats = { kills: 0, deaths: 0, caps: 0, bestStreak: 0, damage: 0 };
-    this.barrageReady = false;
     this.usedNames = new Set();
+    this.net = null; // NetHost, falls Mehrspieler
+
+    // Menschliche Spieler: 'local' plus Mitspieler (Schlüssel = Peer-ID)
+    this.humans = new Map();
+    this.local = { key: 'local', name: settings.name || 'Spieler', team: 0, unit: null, stats: newStats(), unlocks, hooks };
+    this.humans.set('local', this.local);
   }
+
+  get player() { return this.local.unit; }
+  get myTeam() { return this.local.team; }
+  get stats() { return this.local.stats; }
+  get barrageReady() { return !!(this.player && this.player.barrageReady); }
+
+  emit(ev) { if (this.net) this.net.event(ev); }
 
   botName() {
     const free = NAMES.filter((n) => !this.usedNames.has(n));
@@ -58,18 +100,22 @@ export class Game {
     return n;
   }
 
-  start(playerDef) {
-    const perTeam = 7;
-    this.player = this.spawnPlayer(playerDef);
+  humansOn(team) {
+    let n = 0;
+    for (const h of this.humans.values()) if (h.team === team) n++;
+    return n;
+  }
+
+  // Startet das Gefecht. playerDef = null: Spieler wählt erst danach (Mehrspieler-Host).
+  start(playerDef, localTeam = 0) {
+    this.local.team = localTeam;
+    if (playerDef) this.spawnHuman(this.local, playerDef);
     for (let team = 0; team < 2; team++) {
-      const n = team === 0 ? perTeam - 1 : perTeam;
+      const n = Math.max(0, PER_TEAM - this.humansOn(team));
       let planes = Math.round(n * 0.5);
-      if (team === 0 && DEFS[playerDef].kind === 'plane') planes--;
-      if (team === 0 && DEFS[playerDef].kind === 'ship') planes++;
-      for (let i = 0; i < n; i++) {
-        const kind = i < planes ? 'plane' : 'ship';
-        this.spawnBot(team, kind, this.botName());
-      }
+      if (playerDef && team === localTeam) planes += DEFS[playerDef].kind === 'plane' ? -1 : 1;
+      planes = clamp(planes, 0, n);
+      for (let i = 0; i < n; i++) this.spawnBot(team, i < planes ? 'plane' : 'ship', this.botName());
     }
   }
 
@@ -114,22 +160,50 @@ export class Game {
     return u;
   }
 
-  spawnPlayer(defId) {
-    const u = createUnit(this, defId, 0, this.settings.name || 'Spieler', true);
-    const sp = this.spawnPoint(0, u.kind);
+  spawnHuman(h, defId) {
+    const old = h.unit;
+    if (old) {
+      old.dispose();
+      const i = this.units.indexOf(old);
+      if (i >= 0) this.units.splice(i, 1);
+    }
+    const u = createUnit(this, defId, h.team, h.name, h.key === 'local');
+    u.human = h;
+    if (h.key !== 'local') { u.ai = new RemoteCtrl(u); u.remote = h.key; }
+    const sp = this.spawnPoint(h.team, u.kind);
     u.spawn(sp.pos, sp.heading);
     this.units.push(u);
-    this.player = u;
+    h.unit = u;
     return u;
   }
 
   respawnPlayer(defId) {
-    const old = this.player;
-    if (old) {
-      old.dispose();
-      this.units.splice(this.units.indexOf(old), 1);
+    return this.spawnHuman(this.local, defId);
+  }
+
+  // Mitspieler kommt dazu: ein Bot seines Teams macht Platz
+  addHuman(h) {
+    h.stats = newStats();
+    this.humans.set(h.key, h);
+    const q = this.respawnQueue.findIndex((r) => r.team === h.team);
+    if (q >= 0) { this.respawnQueue.splice(q, 1); return; }
+    const bot = this.units.find((u) => u.team === h.team && !u.human && !u.escort && u.alive);
+    if (bot) { bot.dispose(); this.units.splice(this.units.indexOf(bot), 1); }
+  }
+
+  // Mitspieler geht: seine Einheit fliegt/fährt als Bot weiter
+  removeHuman(key) {
+    const h = this.humans.get(key);
+    if (!h) return;
+    this.humans.delete(key);
+    const u = h.unit;
+    if (u && u.alive) {
+      u.human = null; u.remote = null;
+      u.ai = u.kind === 'plane' ? new PlaneAI(u, this) : new ShipAI(u, this);
+    } else {
+      if (u) { u.dispose(); this.units.splice(this.units.indexOf(u), 1); }
+      this.respawnQueue.push({ t: this.time + 3, team: h.team, kind: Math.random() < 0.5 ? 'plane' : 'ship', name: this.botName() });
     }
-    return this.spawnPlayer(defId);
   }
 
   nearestEnemy(u, kind, maxDist, filter) {
@@ -158,71 +232,80 @@ export class Game {
     const dealt = Math.min(amount, u.hp);
     u.hp -= amount;
     if (attacker) { u.lastAttacker = attacker; u.lastHit = this.time; }
-    if (attacker && attacker.isPlayer) {
-      this.stats.damage += dealt;
-      this.hooks.hit(u.hp <= 0);
+    if (attacker && attacker.human) {
+      attacker.human.stats.damage += dealt;
+      attacker.human.hooks.hit(u.hp <= 0);
     }
-    if (u.isPlayer) this.hooks.hurt(amount / u.def.hp);
+    if (u.human) u.human.hooks.hurt(amount / u.def.hp, attacker ? attacker.pos : null);
     if (u.hp <= 0) { u.hp = 0; this.kill(u, attacker, type); }
+  }
+
+  blast(pos, size, splash = 0, boom = size) {
+    if (splash) this.effects.splash(pos, splash);
+    this.effects.explosion(pos, size);
+    this.audio.boom(boom, pos);
+    this.emit(['x', +pos.x.toFixed(1), +pos.y.toFixed(1), +pos.z.toFixed(1), size, splash, boom]);
   }
 
   kill(u, killer, how) {
     if (!u.alive) return;
     u.alive = false;
     u.deathTime = this.time;
-    if (u.kind === 'ship') this.effects.explosion(u.pos.clone().setY(u.def.top * 0.6), 3 + u.def.beam * 0.2);
-    else this.effects.explosion(u.pos, 1.5);
-    this.audio.boom(u.kind === 'ship' ? 3 : 1.5, u.pos);
+    if (u.kind === 'ship') this.blast(u.pos.clone().setY(u.def.top * 0.6), 3 + u.def.beam * 0.2, 0, 3);
+    else this.blast(u.pos, 1.5);
     this.tickets[u.team] = Math.max(0, this.tickets[u.team] - (u.kind === 'ship' ? 15 : 6));
-    if (killer && killer !== u && killer.team !== u.team) {
+    const credited = killer && killer !== u && killer.team !== u.team;
+    if (credited) {
       killer.kills++;
       killer.streak++;
-      if (killer.isPlayer) {
-        this.stats.kills++;
-        this.stats.bestStreak = Math.max(this.stats.bestStreak, killer.streak);
+      const h = killer.human;
+      if (h) {
+        h.stats.kills++;
+        h.stats.bestStreak = Math.max(h.stats.bestStreak, killer.streak);
+        h.hooks.kill(u, killer.streak);
         this.streakReward(killer);
       }
-      this.hooks.feed(killer, u, how);
-    } else {
-      this.hooks.feed(null, u, how);
     }
+    this.hooks.feed(credited ? killer : null, u, how);
+    this.emit(['k', credited ? killer.id : 0, u.id, how || '']);
     u.streak = 0;
-    if (u.isPlayer) {
-      this.stats.deaths++;
-      this.barrageReady = false;
-      this.hooks.playerDied(killer);
+    if (u.human) {
+      u.human.stats.deaths++;
+      u.barrageReady = false;
+      u.human.hooks.playerDied(credited ? killer : null);
     } else if (!u.escort) {
-      this.respawnQueue.push({ t: this.time + 9, team: u.team, kind: u.kind, name: u.name, unit: u });
+      this.respawnQueue.push({ t: this.time + 9, team: u.team, kind: u.kind, name: u.name });
     }
   }
 
   streakReward(p) {
+    const h = p.human;
     for (const s of STREAKS) {
       if (s.n !== p.streak) continue;
       if (s.id === 'repair') {
         p.hp = Math.min(p.def.hp, p.hp + p.def.hp * 0.5);
-        this.hooks.reward(s.label, s.text);
+        h.hooks.reward(s.label, s.text);
       } else if (s.unlock) {
-        const fresh = s.unlock.filter((id) => !this.unlocks.has(id));
+        const fresh = s.unlock.filter((id) => !h.unlocks.has(id));
         if (fresh.length) {
-          fresh.forEach((id) => this.unlocks.add(id));
-          this.hooks.unlocked(fresh);
+          fresh.forEach((id) => h.unlocks.add(id));
+          h.hooks.unlocked(fresh);
         }
       } else if (s.id === 'escort') {
-        for (let i = 0; i < 2; i++) this.spawnBot(0, 'plane', 'Rotte ' + (i + 1), 'falke', p);
-        this.hooks.reward(s.label, s.text);
+        for (let i = 0; i < 2; i++) this.spawnBot(p.team, 'plane', 'Rotte ' + (i + 1), 'falke', p);
+        h.hooks.reward(s.label, s.text);
       } else if (s.id === 'barrage') {
-        this.barrageReady = true;
-        this.hooks.reward(s.label, s.text);
+        p.barrageReady = true;
+        h.hooks.reward(s.label, s.text);
       }
     }
   }
 
-  callBarrage(point) {
-    if (!this.barrageReady || !this.player) return false;
-    this.barrageReady = false;
+  callBarrage(point, unit = this.player) {
+    if (!unit || !unit.barrageReady) return false;
+    unit.barrageReady = false;
     for (let i = 0; i < 18; i++) {
-      this.barrages.push({ t: this.time + 2.5 + i * 0.22, x: point.x + rand(-70, 70), z: point.z + rand(-70, 70) });
+      this.barrages.push({ t: this.time + 2.5 + i * 0.22, x: point.x + rand(-70, 70), z: point.z + rand(-70, 70), owner: unit });
     }
     return true;
   }
@@ -235,10 +318,10 @@ export class Game {
     for (const u of this.units) if (!u.removed) u.update(dt);
     this.projectiles.update(dt, this);
 
-    // Abgeschossene Einheiten aufräumen (außer Spieler, den räumt respawnPlayer ab)
+    // Abgeschossene Einheiten aufräumen (menschliche räumt spawnHuman ab)
     for (let i = this.units.length - 1; i >= 0; i--) {
       const u = this.units[i];
-      if (u.removed && !u.isPlayer && this.time - u.deathTime > 2) {
+      if (u.removed && !u.human && this.time - u.deathTime > 2) {
         u.dispose();
         this.units.splice(i, 1);
       }
@@ -255,7 +338,7 @@ export class Game {
       if (this.time >= b.t) {
         this.barrages.splice(i, 1);
         const p = new THREE.Vector3(b.x, 900, b.z);
-        this.projectiles.fire('shell', p, new THREE.Vector3(rand(-5, 5), -420, rand(-5, 5)), this.player, { dmg: 650, splash: 30, life: 6, size: 1.2 });
+        this.projectiles.fire('shell', p, new THREE.Vector3(rand(-5, 5), -420, rand(-5, 5)), b.owner, { dmg: 650, splash: 30, life: 6, size: 1.2 });
       }
     }
 
@@ -265,6 +348,7 @@ export class Game {
       this.over = true;
       this.winner = this.tickets[0] === this.tickets[1] ? -1 : this.tickets[0] > this.tickets[1] ? 0 : 1;
       this.hooks.end(this.winner);
+      if (this.net) this.net.end(this.winner);
     }
   }
 
@@ -296,11 +380,12 @@ export class Game {
 
   capture(z, team) {
     z.owner = team;
-    const p = this.player;
-    if (p && p.alive && p.team === team && p.kind === 'ship' && Math.hypot(p.pos.x - z.x, p.pos.z - z.z) < z.r) {
-      this.stats.caps++;
+    for (const h of this.humans.values()) {
+      const p = h.unit;
+      if (p && p.alive && p.team === team && p.kind === 'ship' && Math.hypot(p.pos.x - z.x, p.pos.z - z.z) < z.r) h.stats.caps++;
     }
     this.hooks.zone(z, team);
+    this.emit(['z', this.zones.indexOf(z), team]);
   }
 
   dispose() {
